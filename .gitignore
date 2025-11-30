@@ -1,0 +1,76 @@
+# ============================================
+# Python Cache & Build Artifacts
+# ============================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ============================================
+# Virtual Environments
+# ============================================
+venv/
+venv*/
+.venv/
+.venv*/
+
+# ============================================
+# Streamlit Secrets (Critical — NEVER COMMIT)
+# ============================================
+.streamlit/secrets.toml
+
+# ============================================
+# Environment Variables (Critical)
+# ============================================
+.env
+.env.*
+*.env
+
+# ============================================
+# Local Data, Uploads & User Files
+# ============================================
+# Ignore local PDF, DOCX, TXT, MD files — BUT keep official project files.
+*.pdf
+*.docx
+
+# Ignore all text files EXCEPT required project files
+*.txt
+!requirements.txt
+!README.txt
+!README
+
+# Ignore all markdown files EXCEPT project docs
+*.md
+!README.md
+!SECURITY.md
+
+# User uploads
+uploads/
+user_uploads/
+tmp/
+temp/
+
+# ============================================
+# OS-generated files
+# ============================================
+.DS_Store
+Thumbs.db
+
+# ============================================
+# IDE / Editor junk
+# ============================================
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# ============================================
+# Log files
+# ============================================
+*.log
+logs/
