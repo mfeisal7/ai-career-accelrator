@@ -1,4 +1,3 @@
-# payments.py
 """
 Backend IntaSend M-Pesa helper functions.
 
@@ -16,6 +15,10 @@ import re
 import requests
 import streamlit as st
 
+
+# ------------------------------------------------------------
+# Phone Normalization
+# ------------------------------------------------------------
 
 def normalize_phone(phone_number: str) -> str:
     """
@@ -52,40 +55,44 @@ def normalize_phone(phone_number: str) -> str:
     return digits
 
 
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+
 def get_intasend_config() -> dict:
     """
     Load IntaSend configuration from Streamlit secrets using FLAT keys.
 
     Expected structure in .streamlit/secrets.toml:
 
-        INTASEND_PUBLISHABLE_KEY = "pk_live_..."
-        INTASEND_API_KEY         = "sk_live_..."
+        INTASEND_PUBLISHABLE_KEY = "ISPubKey_live_..."
+        INTASEND_API_KEY         = "ISSecretKey_live_..."
 
     Optional overrides (not required; safe defaults are used if missing):
 
-        INTASEND_BASE_URL    = "https://payment.intasend.com/api/v1"
+        INTASEND_BASE_URL    = "https://api.intasend.com/api/v1"
         INTASEND_WEBHOOK_URL = "https://your-domain.com/intasend/webhook"
 
     Returns:
         dict with:
             - publishable_key (str)
-            - api_key (str)
-            - base_url (str)    -> defaults to IntaSend public API base
+            - api_key (str)        -> used as Bearer token
+            - base_url (str)
             - webhook_url (str | None)
     """
     # Required keys – will raise a KeyError if missing, which the caller handles.
     publishable_key = st.secrets["INTASEND_PUBLISHABLE_KEY"]
     api_key = st.secrets["INTASEND_API_KEY"]
 
-    # Optional: base URL override
+    # Optional: base URL override (sandbox vs live)
     raw_base_url = st.secrets.get("INTASEND_BASE_URL", "")
     if isinstance(raw_base_url, str):
         raw_base_url = raw_base_url.strip()
     else:
         raw_base_url = ""
 
-    # IntaSend default base URL if not provided
-    base_url = raw_base_url or "https://payment.intasend.com/api/v1"
+    # Current IntaSend API base URL default
+    base_url = raw_base_url or "https://api.intasend.com/api/v1"
 
     # Optional: webhook URL (not currently used by this module, but returned for completeness)
     raw_webhook = st.secrets.get("INTASEND_WEBHOOK_URL")
@@ -102,7 +109,15 @@ def get_intasend_config() -> dict:
     }
 
 
-def trigger_mpesa_payment(phone_number: str, amount: int) -> Optional[str]:
+# ------------------------------------------------------------
+# STK Push
+# ------------------------------------------------------------
+
+def trigger_mpesa_payment(
+    phone_number: str,
+    amount: int,
+    api_ref: str = "career-accelerator-premium-v1",
+) -> Optional[str]:
     """
     Initiate an M-Pesa STK push via IntaSend.
 
@@ -112,6 +127,7 @@ def trigger_mpesa_payment(phone_number: str, amount: int) -> Optional[str]:
     Args:
         phone_number: User's phone number; accepts 07/01, +2547/1, 7/1, etc.
         amount: Amount in KES (will be coerced to an integer string).
+        api_ref: Optional reference string for your own tracking.
 
     Returns:
         invoice_id (str) if the request was accepted by IntaSend,
@@ -126,39 +142,48 @@ def trigger_mpesa_payment(phone_number: str, amount: int) -> Optional[str]:
 
     msisdn = normalize_phone(phone_number)
 
-    url = f'{cfg["base_url"]}/payment/mpesa/'
+    # Correct IntaSend MPesa STK Push endpoint
+    url = f'{cfg["base_url"]}/payment/mpesa-stk-push/'
 
     payload = {
-        "public_key": cfg["publishable_key"],
-        "amount": str(int(amount)),  # ensure it's a stringified integer
+        "amount": str(int(amount)),        # must be a string
         "phone_number": msisdn,
-        "currency": "KES",
-        # Optional: "email", "name", etc. if you collect them in the UI.
+        "api_ref": api_ref,
+        # Optional extras if you later collect them:
+        # "wallet_id": "...",
+        # "mobile_tarrif": "CUSTOMER_PAYS",
     }
 
     headers = {
-        "Authorization": f'Bearer {cfg["api_key"]}',
+        "Authorization": f'Bearer {cfg["api_key"]}',  # secret token
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=20)
+        # For debugging in Streamlit logs if something goes wrong:
+        print(f"[IntaSend] STK push response {resp.status_code}: {resp.text}")
+
         resp.raise_for_status()
         data = resp.json()
 
-        # IntaSend typically returns an "invoice" or "invoice_id" field.
-        invoice_id = data.get("invoice") or data.get("invoice_id")
+        # IntaSend returns an invoice_id used for status checks
+        invoice_id = data.get("invoice_id") or data.get("invoice")
         if invoice_id:
             return invoice_id
 
-        print(f"[IntaSend] Unexpected payment response payload: {data}")
+        print(f"[IntaSend] Unexpected payment response payload (no invoice_id): {data}")
         return None
 
     except Exception as e:
         print(f"[IntaSend] STK push failed: {e}")
         return None
 
+
+# ------------------------------------------------------------
+# Payment Status Polling
+# ------------------------------------------------------------
 
 def check_payment_status(invoice_id: str) -> Optional[bool]:
     """
@@ -180,15 +205,21 @@ def check_payment_status(invoice_id: str) -> Optional[bool]:
         print(f"[IntaSend] Missing or invalid configuration: {e}")
         return None
 
-    url = f'{cfg["base_url"]}/payment/status/{invoice_id}/'
+    # Correct status endpoint: POST to /payment/status/ with invoice_id in JSON body
+    url = f'{cfg["base_url"]}/payment/status/'
 
     headers = {
         "Authorization": f'Bearer {cfg["api_key"]}',
+        "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
+    payload = {"invoice_id": invoice_id}
+
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        print(f"[IntaSend] Status response {resp.status_code}: {resp.text}")
+
         resp.raise_for_status()
         data = resp.json()
 
@@ -200,7 +231,7 @@ def check_payment_status(invoice_id: str) -> Optional[bool]:
         if status in {"FAILED", "CANCELLED", "DECLINED"}:
             return False
 
-        # Any other state (including PENDING) -> still in progress
+        # Any other state (including PENDING) -> still in progress / unknown
         return None
 
     except Exception as e:
