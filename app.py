@@ -17,8 +17,8 @@ from agents import (
 from docx import Document
 from fpdf import FPDF
 
-# M-Pesa backend helpers
-from payments import trigger_mpesa_stk, check_payment_status
+# IntaSend backend helpers
+from payments import trigger_mpesa_payment, check_payment_status
 
 
 # ============================================================
@@ -210,6 +210,23 @@ def to_pdf(markdown_text: str) -> bytes:
 st.set_page_config(page_title="AI Career Accelerator", layout="wide")
 init_state()
 
+# ====== Copy Protection CSS (Preview Only) ==================
+st.markdown(
+    """
+    <style>
+    /* A reusable "no-copy" wrapper for preview content */
+    .no-copy-container, .no-copy-container * {
+        -webkit-user-select: none !important;  /* Safari/Chrome */
+        -moz-user-select: none !important;     /* Firefox */
+        -ms-user-select: none !important;      /* IE/Edge */
+        user-select: none !important;
+        -webkit-touch-callout: none;           /* iOS long-press */
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🚀 AI Career Accelerator")
 st.caption("Upload your resume, paste a job description, and generate a complete application kit in minutes.")
 
@@ -270,6 +287,7 @@ with st.sidebar:
         )
         st.caption("Tip: A rough outline is enough. The AI will polish it into a professional resume.")
 
+    # API key for Gemini
     if "GEMINI_API_KEY" in st.secrets:
         st.session_state.api_key = st.secrets["GEMINI_API_KEY"]
         st.markdown("✅ **Pro Access Enabled**")
@@ -330,7 +348,7 @@ with tab_setup:
                     )
                     st.session_state.job_analysis_json = job_analysis
 
-                with st.spinner("Rewriting your resume for this role..."):
+                with st.spinner("Rewriting your resume for this role."):
                     rewritten_resume = rewrite_resume(
                         st.session_state.resume_text,
                         st.session_state.job_analysis_json,
@@ -338,7 +356,7 @@ with tab_setup:
                     )
                 st.session_state.final_resume_text = rewritten_resume
 
-                with st.spinner("Generating tailored cover letter..."):
+                with st.spinner("Generating tailored cover letter."):
                     cover_letter = generate_cover_letter(
                         st.session_state.resume_text,
                         st.session_state.job_analysis_json,
@@ -346,7 +364,7 @@ with tab_setup:
                     )
                     st.session_state.cover_letter_text = cover_letter
 
-                with st.spinner("Creating follow-up email strategy..."):
+                with st.spinner("Creating follow-up email strategy."):
                     emails = generate_emails(
                         st.session_state.job_analysis_json,
                         st.session_state.api_key,
@@ -377,7 +395,7 @@ with tab_setup:
 
 
 # ------------------------------------------------------------
-# TAB 2: Tailored Resume (Hard Paywall + M-Pesa)
+# TAB 2: Tailored Resume (Hard Paywall + IntaSend + Copy Protection)
 # ------------------------------------------------------------
 with tab_resume:
     st.header("3. Tailored Resume")
@@ -389,7 +407,11 @@ with tab_resume:
             "Below is your **ATS-optimized resume** in Markdown. "
             "Preview is free. To download in any format, unlock Premium access."
         )
+
+        # Copy-protected preview wrapper
+        st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
         st.markdown(resume_md)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         col_md, col_docx, col_pdf = st.columns(3)
 
@@ -429,7 +451,7 @@ with tab_resume:
                 st.write("**KES 1,500**")
 
                 phone_input_resume = st.text_input(
-                    "M-Pesa Number",
+                    "M-Pesa Number (via IntaSend)",
                     placeholder="0712345678",
                     key="mpesa_phone_resume",
                 )
@@ -438,13 +460,16 @@ with tab_resume:
                     if not phone_input_resume:
                         st.error("Please enter your M-Pesa phone number.")
                     else:
-                        with st.spinner("Sending payment request to your phone..."):
-                            checkout_id = trigger_mpesa_stk(phone_input_resume, amount=1500)
+                        with st.spinner("Sending IntaSend payment request to your phone..."):
+                            invoice_id = trigger_mpesa_payment(
+                                phone_number=phone_input_resume,
+                                amount=1500,
+                            )
 
-                        if not checkout_id:
-                            st.error("Unable to initiate M-Pesa payment. Please try again.")
+                        if not invoice_id:
+                            st.error("Unable to initiate payment via IntaSend. Please try again.")
                         else:
-                            st.info("📲 STK Push sent! Check your phone and enter your M-Pesa PIN.")
+                            st.info("📲 STK Push sent via IntaSend! Check your phone and enter your M-Pesa PIN.")
                             progress_bar = st.progress(0)
                             payment_success = False
                             status = None
@@ -452,7 +477,7 @@ with tab_resume:
                             # Poll up to 45 seconds (15 × 3s)
                             for i in range(15):
                                 time.sleep(3)
-                                status = check_payment_status(checkout_id)
+                                status = check_payment_status(invoice_id)
                                 progress_bar.progress(int((i + 1) / 15 * 100))
 
                                 if status is True:
@@ -477,7 +502,7 @@ with tab_resume:
 
 
 # ------------------------------------------------------------
-# TAB 3: Custom Cover Letter (Hard Paywall + M-Pesa)
+# TAB 3: Custom Cover Letter (Hard Paywall + IntaSend + Copy Protection)
 # ------------------------------------------------------------
 with tab_cover:
     st.header("4. Custom Cover Letter")
@@ -487,13 +512,19 @@ with tab_cover:
 
         st.markdown(
             "Here is your **tailored cover letter**. "
-            "Preview and inline editing are free. To download in any format, unlock Premium."
+            "Preview is free. To download in any format, unlock Premium."
         )
+
+        # Copy-protected preview wrapper (read-only textarea)
+        st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
         st.text_area(
-            "Cover Letter",
+            "Cover Letter (Preview Only)",
             value=cover_text,
             height=350,
+            disabled=True,
+            key="cover_preview",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
         col_txt, col_docx, col_pdf = st.columns(3)
 
@@ -533,7 +564,7 @@ with tab_cover:
                 st.write("**KES 1,500**")
 
                 phone_input_cover = st.text_input(
-                    "M-Pesa Number",
+                    "M-Pesa Number (via IntaSend)",
                     placeholder="0712345678",
                     key="mpesa_phone_cover",
                 )
@@ -542,20 +573,23 @@ with tab_cover:
                     if not phone_input_cover:
                         st.error("Please enter your M-Pesa phone number.")
                     else:
-                        with st.spinner("Sending payment request to your phone..."):
-                            checkout_id = trigger_mpesa_stk(phone_input_cover, amount=1500)
+                        with st.spinner("Sending IntaSend payment request to your phone..."):
+                            invoice_id = trigger_mpesa_payment(
+                                phone_number=phone_input_cover,
+                                amount=1500,
+                            )
 
-                        if not checkout_id:
-                            st.error("Unable to initiate M-Pesa payment. Please try again.")
+                        if not invoice_id:
+                            st.error("Unable to initiate payment via IntaSend. Please try again.")
                         else:
-                            st.info("📲 STK Push sent! Check your phone and enter your M-Pesa PIN.")
+                            st.info("📲 STK Push sent via IntaSend! Check your phone and enter your M-Pesa PIN.")
                             progress_bar = st.progress(0)
                             payment_success = False
                             status = None
 
                             for i in range(15):
                                 time.sleep(3)
-                                status = check_payment_status(checkout_id)
+                                status = check_payment_status(invoice_id)
                                 progress_bar.progress(int((i + 1) / 15 * 100))
 
                                 if status is True:
