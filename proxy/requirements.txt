@@ -1,4 +1,8 @@
+# Core app
 streamlit>=1.40.0
+
+# Gemini / Google Generative AI client
+google-generativeai>=0.8.0
 
 # HTTP / networking
 requests>=2.31.0
