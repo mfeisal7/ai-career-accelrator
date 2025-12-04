@@ -1,111 +1,21 @@
 # agents.py
 import json
 import re
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 
-import streamlit as st
-import google.generativeai as genai
+import requests
 import pypdf
 
 
 # ============================================================
-# Gemini Configuration
+# Proxy Configuration
 # ============================================================
 
-def _configure_gemini(api_key: str) -> None:
-    """
-    Configure the Gemini client with the provided API key.
-    """
-    if not api_key:
-        raise ValueError("Google Gemini API key is required.")
-    genai.configure(api_key=api_key)
-
-
-@st.cache_resource(show_spinner=False)
-def _get_working_model(api_key: str) -> Tuple[str, Any]:
-    """
-    Dynamic Model Discovery + Live Model Validator.
-
-    Steps:
-    1. Configure Gemini with the provided API key.
-    2. Call genai.list_models() to discover which models are available.
-    3. Filter to models that support the 'generateContent' method.
-    4. Prefer models whose name contains 'flash' (fast), but accept any
-       generateContent-capable model if no flash model is available.
-    5. For each candidate model, perform a minimal 'ping' generate_content
-       call to ensure the model actually works with this key/region.
-    6. Return (model_name, model_instance) for the first working model.
-
-    If no working model is found, raise a detailed RuntimeError instructing
-    the user to check their API key and project configuration.
-    """
-    _configure_gemini(api_key)
-
-    try:
-        available_models = list(genai.list_models())
-    except Exception as e:
-        raise RuntimeError(
-            "Failed to list available Gemini models. "
-            "Please verify your API key, project, and region configuration."
-        ) from e
-
-    if not available_models:
-        raise RuntimeError(
-            "No Gemini models are visible to this API key. "
-            "Please ensure your Google Cloud project has Gemini access enabled."
-        )
-
-    # Filter to models that support generateContent
-    generate_capable = [
-        m
-        for m in available_models
-        if "generateContent" in getattr(m, "supported_generation_methods", [])
-    ]
-
-    if not generate_capable:
-        names = [m.name for m in available_models]
-        raise RuntimeError(
-            "Your API key does not have access to any Gemini models that support "
-            "'generateContent'. Available models: "
-            f"{names}. Please enable text generation models in your project."
-        )
-
-    # Sort for deterministic order
-    generate_capable = sorted(generate_capable, key=lambda m: m.name)
-
-    # Prefer 'flash' models, then fall back to any other generateContent-capable model
-    flash_candidates = [m for m in generate_capable if "flash" in m.name.lower()]
-    other_candidates = [m for m in generate_capable if m not in flash_candidates]
-
-    ordered_candidates = flash_candidates + other_candidates
-
-    last_error: Exception | None = None
-    tried_names: List[str] = []
-
-    for meta in ordered_candidates:
-        model_name = meta.name
-        tried_names.append(model_name)
-        try:
-            model = genai.GenerativeModel(model_name)
-            # Minimal "ping" to validate model works with this key/region
-            resp = model.generate_content(
-                "ping",
-                generation_config={
-                    "max_output_tokens": 1,
-                },
-            )
-            _ = getattr(resp, "text", None)
-            return model_name, model
-        except Exception as e:
-            last_error = e
-            continue
-
-    raise RuntimeError(
-        "Could not find a working Gemini model that supports generateContent "
-        "for this API key/region.\n"
-        f"Models tried: {tried_names}\n"
-        f"Last error: {last_error}"
-    )
+# Your public proxy URL (behind which the real Gemini key is stored securely)
+PROXY_URL = (
+    "https://gemini-proxy.mycompany.com/"
+    "v1/models/gemini-1.5-pro:generateContent"
+)
 
 
 # ============================================================
@@ -158,96 +68,124 @@ def _extract_json_block(raw: str) -> str:
 
 
 # ============================================================
-# Gemini Call Helpers (Text & JSON)
+# Low-level Proxy Call Helpers
 # ============================================================
 
-def _call_gemini_text(
-    api_key: str,
+def _post_to_proxy(
     prompt: str,
     temperature: float = 0.7,
-    response_mime_type: str = "text/plain",
-) -> str:
+    response_mime_type: str | None = "text/plain",
+) -> Dict[str, Any]:
     """
-    Call Gemini for free-form text/markdown responses.
-    Uses the dynamically discovered working model from _get_working_model.
+    Send a generateContent request to the Gemini proxy.
+
+    - If the proxy is down or returns 5xx, raise RuntimeError("Service temporarily unavailable").
+    - Otherwise, return the decoded JSON body.
     """
-    model_name, model = _get_working_model(api_key)
+    payload: Dict[str, Any] = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+        },
+    }
+
+    # REST uses camelCase 'responseMimeType'
+    if response_mime_type:
+        payload["generationConfig"]["responseMimeType"] = response_mime_type
 
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": temperature,
-                "response_mime_type": response_mime_type,
-            },
-        )
-        text = getattr(response, "text", "") or ""
-        return text.strip()
-    except Exception as e:
-        raise RuntimeError(
-            f"Gemini text generation error using model '{model_name}': {str(e)}"
-        ) from e
+        resp = requests.post(PROXY_URL, json=payload, timeout=40.0)
+    except requests.RequestException:
+        # Network / DNS / connection error to proxy
+        raise RuntimeError("Service temporarily unavailable")
+
+    # Treat proxy 5xx (and forwarded upstream 5xx) as "temporarily unavailable"
+    if resp.status_code >= 500:
+        raise RuntimeError("Service temporarily unavailable")
+
+    try:
+        data = resp.json()
+    except ValueError:
+        raise RuntimeError("Unexpected response from language service.")
+
+    # Some Gemini error responses come as JSON with 'error'
+    if "error" in data:
+        # If it’s a 4xx with an explicit error, surface something slightly readable
+        message = data["error"].get("message") or "Upstream error."
+        raise RuntimeError(message)
+
+    return data
+
+
+def _extract_text_from_candidates(data: Dict[str, Any]) -> str:
+    """
+    Extract the main text from Gemini's generateContent response.
+    """
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return ""
+
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+
+    texts: List[str] = []
+    for part in parts:
+        if isinstance(part, dict):
+            t = part.get("text")
+            if t:
+                texts.append(t)
+
+    return "".join(texts).strip()
+
+
+def _call_gemini_text(
+    prompt: str,
+    temperature: float = 0.7,
+) -> str:
+    """
+    Call Gemini (via proxy) for free-form text/markdown responses.
+    """
+    data = _post_to_proxy(
+        prompt=prompt,
+        temperature=temperature,
+        response_mime_type="text/plain",
+    )
+    text = _extract_text_from_candidates(data)
+    return text.strip()
 
 
 def _call_gemini_json(
-    api_key: str,
     prompt: str,
     temperature: float = 0.3,
 ) -> Any:
     """
-    Call Gemini and parse JSON, with smart handling for models that support
-    native JSON mode vs. those that do not.
+    Call Gemini (via proxy) and parse JSON.
 
-    Logic:
-    - Use _get_working_model to dynamically discover an available model.
-    - If the selected model is a 1.5 / 'flash' variant, send
-      response_mime_type='application/json' to request structured output.
-    - Otherwise, do NOT set response_mime_type (some legacy models will
-      reject it) and treat the response as plain text, extracting JSON
-      with regex as needed.
-
-    In all cases:
-    - First attempt json.loads(raw) directly.
-    - On failure, fall back to _extract_json_block(raw) and json.loads().
+    - Requests application/json from the model.
+    - First tries json.loads(raw_text) directly.
+    - On failure, falls back to _extract_json_block + json.loads().
     """
-    model_name, model = _get_working_model(api_key)
+    data = _post_to_proxy(
+        prompt=prompt,
+        temperature=temperature,
+        response_mime_type="application/json",
+    )
 
-    # Decide whether the model natively supports JSON mime-type:
-    # Heuristic: 1.5 models and those with "flash" usually support it.
-    name_lower = model_name.lower()
-    is_json_native = ("1.5" in model_name) or ("flash" in name_lower)
-
-    generation_config: Dict[str, Any] = {
-        "temperature": temperature,
-    }
-    if is_json_native:
-        generation_config["response_mime_type"] = "application/json"
+    raw = _extract_text_from_candidates(data)
+    if not raw:
+        raise RuntimeError("Empty response from language service.")
 
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=generation_config,
-        )
-        raw = getattr(response, "text", "") or ""
-
-        # First, try to parse raw directly as JSON.
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            # Fallback: regex-based extraction, important for models that
-            # return chatty text or markdown-wrapped JSON.
-            json_str = _extract_json_block(raw)
-            return json.loads(json_str)
-
-    except json.JSONDecodeError as je:
-        raise RuntimeError(
-            f"Failed to parse JSON from Gemini response using model '{model_name}': "
-            f"{je}\nRaw response: {raw}"
-        ) from je
-    except Exception as e:
-        raise RuntimeError(
-            f"Gemini JSON generation error using model '{model_name}': {str(e)}"
-        ) from e
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        json_str = _extract_json_block(raw)
+        return json.loads(json_str)
 
 
 # ============================================================
@@ -286,7 +224,7 @@ def extract_text_from_pdf(uploaded_file) -> str:
 # 1. Job Analysis Agent (JSON Mode)
 # ============================================================
 
-def analyze_job(job_text: str, api_key: str) -> Dict[str, Any]:
+def analyze_job(job_text: str) -> Dict[str, Any]:
     """
     Analyze the job description and return a structured JSON object.
 
@@ -340,7 +278,7 @@ Requirements:
 Job Description:
 \"\"\"{job_text}\"\"\""""
 
-    result = _call_gemini_json(api_key=api_key, prompt=prompt, temperature=0.2)
+    result = _call_gemini_json(prompt=prompt, temperature=0.2)
 
     if not isinstance(result, dict):
         raise RuntimeError("Job analysis result is not a JSON object.")
@@ -355,7 +293,7 @@ Job Description:
 # 2. Resume Rewriting Agent (Text/Markdown Mode)
 # ============================================================
 
-def rewrite_resume(current_resume: str, job_analysis: Dict[str, Any], api_key: str) -> str:
+def rewrite_resume(current_resume: str, job_analysis: Dict[str, Any]) -> str:
     """
     Rewrite the resume in clean, professional Markdown format tailored to the job.
     """
@@ -407,13 +345,9 @@ Original Resume:
 Return ONLY the rewritten resume in Markdown. Do NOT include any additional commentary or explanation.
 """
 
-    # IMPORTANT: Gemini 2.0 only accepts "text/plain" or "application/json".
-    # We still get Markdown formatting because the prompt explicitly demands it.
     return _call_gemini_text(
-        api_key=api_key,
         prompt=prompt,
         temperature=0.6,
-        response_mime_type="text/plain",
     )
 
 
@@ -421,7 +355,7 @@ Return ONLY the rewritten resume in Markdown. Do NOT include any additional comm
 # 3. Cover Letter Agent (Text Mode)
 # ============================================================
 
-def generate_cover_letter(current_resume: str, job_analysis: Dict[str, Any], api_key: str) -> str:
+def generate_cover_letter(current_resume: str, job_analysis: Dict[str, Any]) -> str:
     """
     Generate a highly tailored cover letter (plain text).
     """
@@ -461,10 +395,8 @@ Return ONLY the cover letter text.
 """
 
     return _call_gemini_text(
-        api_key=api_key,
         prompt=prompt,
         temperature=0.7,
-        response_mime_type="text/plain",
     )
 
 
@@ -472,7 +404,7 @@ Return ONLY the cover letter text.
 # 4. Follow-up Email Strategy Agent (JSON Mode)
 # ============================================================
 
-def generate_emails(job_analysis: Dict[str, Any], api_key: str) -> List[Dict[str, str]]:
+def generate_emails(job_analysis: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     Generate a strategic follow-up email sequence as JSON.
 
@@ -536,7 +468,7 @@ Guidelines:
 - Do NOT include any explanatory text outside the JSON array.
 """
 
-    result = _call_gemini_json(api_key=api_key, prompt=prompt, temperature=0.4)
+    result = _call_gemini_json(prompt=prompt, temperature=0.4)
 
     if not isinstance(result, list):
         raise RuntimeError("Email generation result is not a JSON array.")

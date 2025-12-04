@@ -2,6 +2,7 @@
 Backend IntaSend M-Pesa helper functions.
 
 This module is UI-agnostic. It only exposes:
+- normalize_phone()
 - get_intasend_config()
 - trigger_mpesa_payment()
 - check_payment_status()
@@ -10,10 +11,10 @@ All Streamlit UI code must live in app.py.
 """
 
 from typing import Optional
+import os
 import re
 
 import requests
-import streamlit as st
 
 
 # ------------------------------------------------------------
@@ -61,17 +62,14 @@ def normalize_phone(phone_number: str) -> str:
 
 def get_intasend_config() -> dict:
     """
-    Load IntaSend configuration from Streamlit secrets using FLAT keys.
+    Load IntaSend configuration from environment variables.
 
-    Expected structure in .streamlit/secrets.toml:
+    Recommended env setup:
 
         INTASEND_PUBLISHABLE_KEY = "ISPubKey_live_..."
         INTASEND_API_KEY         = "ISSecretKey_live_..."
-
-    Optional overrides (not required; safe defaults are used if missing):
-
-        INTASEND_BASE_URL    = "https://api.intasend.com/api/v1"
-        INTASEND_WEBHOOK_URL = "https://your-domain.com/intasend/webhook"
+        INTASEND_BASE_URL        = "https://api.intasend.com/api/v1"      # optional
+        INTASEND_WEBHOOK_URL     = "https://your-domain.com/intasend/webhook"  # optional
 
     Returns:
         dict with:
@@ -79,27 +77,19 @@ def get_intasend_config() -> dict:
             - api_key (str)        -> used as Bearer token
             - base_url (str)
             - webhook_url (str | None)
+
+    Raises:
+        KeyError if required variables are missing.
     """
-    # Required keys – will raise a KeyError if missing, which the caller handles.
-    publishable_key = st.secrets["INTASEND_PUBLISHABLE_KEY"]
-    api_key = st.secrets["INTASEND_API_KEY"]
+    publishable_key = os.environ["INTASEND_PUBLISHABLE_KEY"]
+    api_key = os.environ["INTASEND_API_KEY"]
 
-    # Optional: base URL override (sandbox vs live)
-    raw_base_url = st.secrets.get("INTASEND_BASE_URL", "")
-    if isinstance(raw_base_url, str):
-        raw_base_url = raw_base_url.strip()
-    else:
-        raw_base_url = ""
-
-    # Current IntaSend API base URL default
+    raw_base_url = os.environ.get("INTASEND_BASE_URL", "").strip()
     base_url = raw_base_url or "https://api.intasend.com/api/v1"
 
-    # Optional: webhook URL (not currently used by this module, but returned for completeness)
-    raw_webhook = st.secrets.get("INTASEND_WEBHOOK_URL")
+    raw_webhook = os.environ.get("INTASEND_WEBHOOK_URL", "") or None
     if isinstance(raw_webhook, str):
         raw_webhook = raw_webhook.strip() or None
-    else:
-        raw_webhook = None
 
     return {
         "publishable_key": publishable_key,
@@ -162,7 +152,7 @@ def trigger_mpesa_payment(
 
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=20)
-        # For debugging in Streamlit logs if something goes wrong:
+        # For debugging in logs if something goes wrong:
         print(f"[IntaSend] STK push response {resp.status_code}: {resp.text}")
 
         resp.raise_for_status()

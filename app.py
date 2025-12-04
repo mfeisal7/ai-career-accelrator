@@ -1,7 +1,7 @@
 # app.py
 import json
 import re
-import time
+import uuid
 from io import BytesIO
 
 import streamlit as st
@@ -13,12 +13,96 @@ from agents import (
     generate_cover_letter,
     generate_emails,
 )
-
 from docx import Document
 from fpdf import FPDF
 
-# IntaSend backend helpers
+# IntaSend backend helper
 from payments import trigger_mpesa_payment, check_payment_status
+
+# Payments DB
+from payments_db import init_db, create_payment, is_user_paid, mark_invoice_paid
+
+# Webhook server (FastAPI) runner
+import threading
+from webhook_server import run as run_webhook_server
+
+
+# ============================================================
+# One-time initialization: DB + Webhook server
+# ============================================================
+
+# Ensure SQLite is ready
+init_db()
+
+
+@st.singleton
+def _start_webhook_server_once() -> bool:
+    """
+    Start the FastAPI webhook server exactly once per process
+    using a daemon thread.
+    """
+    thread = threading.Thread(
+        target=run_webhook_server,
+        kwargs={"host": "0.0.0.0", "port": 8000},
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+_start_webhook_server_once()
+
+
+# ============================================================
+# Session / User ID helpers
+# ============================================================
+
+def get_or_create_user_id() -> str:
+    """
+    Generate a persistent user_id for this browser.
+
+    - Stored in st.session_state["user_id"]
+    - Also persisted in URL query params for persistence between reloads.
+    - We *attempt* to set a cookie via JavaScript. Note: due to Streamlit's
+      architecture we cannot set a true HTTP-only cookie from here. For
+      that, you'd typically terminate Streamlit behind a reverse proxy
+      (e.g. Nginx) that injects the cookie in the HTTP response.
+    """
+    if "user_id" in st.session_state and st.session_state["user_id"]:
+        return st.session_state["user_id"]
+
+    # Try to get from URL query params first
+    query_params = st.experimental_get_query_params()
+    existing_uid = query_params.get("user_id", [None])[0]
+
+    if existing_uid:
+        user_id = existing_uid
+    else:
+        user_id = str(uuid.uuid4())
+        # Persist in URL for this browser session
+        query_params["user_id"] = [user_id]
+        st.experimental_set_query_params(**query_params)
+
+    st.session_state["user_id"] = user_id
+
+    # Best-effort, non-HTTP-only cookie via JS (cannot set httpOnly from JS).
+    st.markdown(
+        f"""
+        <script>
+        (function() {{
+            var cookie = document.cookie || "";
+            if (!cookie.includes("user_id=")) {{
+                var d = new Date();
+                d.setTime(d.getTime() + (365*24*60*60*1000)); // 1 year
+                document.cookie = "user_id={user_id};expires=" + d.toUTCString() + ";path=/;SameSite=Lax";
+            }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    return user_id
 
 
 # ============================================================
@@ -37,10 +121,11 @@ def init_state() -> None:
         "final_resume_text": "",
         "cover_letter_text": "",
         "follow_up_emails": [],
-        "api_key": "",
         "last_uploaded_filename": "",      # track last uploaded resume file name
         "resume_input_mode": "Upload PDF Resume",  # resume input mode
-        "is_paid": False,                  # Freemium flag
+        # Payment-related UI flags (state about *expecting* a webhook / manual check)
+        "waiting_for_payment": False,
+        "pending_invoice_id": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -204,11 +289,176 @@ def to_pdf(markdown_text: str) -> bytes:
 
 
 # ============================================================
+# Payment UI Helpers
+# ============================================================
+
+def render_payment_gate(feature_name: str, amount: int, user_id: str) -> None:
+    """
+    Reusable payment gate for any premium feature.
+
+    Flow:
+      1. User enters phone, clicks "Pay KES X" -> trigger_mpesa_payment()
+      2. Show "STK push sent! Complete on your phone then click below"
+      3. Show "I have paid – Check Status" button
+      4. On click, call check_payment_status(invoice_id) once:
+         - If True: mark_invoice_paid + success + st.rerun()
+         - If False: show error
+         - If None: show 'still pending' warning
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", feature_name.lower()).strip("_") or "premium"
+
+    phone_key = f"mpesa_phone_{slug}"
+    pay_button_key = f"pay_{slug}"
+    status_button_key = f"check_status_{slug}"
+
+    st.markdown("### 🔓 Premium Unlock")
+    st.write(f"Unlock **all {feature_name.lower()} downloads** (Markdown, Word, PDF) for:")
+    st.write(f"**KES {amount:,}**")
+
+    phone_input = st.text_input(
+        "M-Pesa Number (via IntaSend)",
+        placeholder="0712345678",
+        key=phone_key,
+    )
+
+    if st.button(f"Pay KES {amount:,}", key=pay_button_key):
+        if not phone_input:
+            st.error("Please enter your M-Pesa phone number.")
+        else:
+            with st.spinner("Sending IntaSend payment request to your phone..."):
+                invoice_id = trigger_mpesa_payment(
+                    phone_number=phone_input,
+                    amount=amount,
+                )
+
+            if not invoice_id:
+                st.error("Unable to initiate payment via IntaSend. Please try again.")
+            else:
+                create_payment(
+                    user_id=user_id,
+                    phone=phone_input,
+                    invoice_id=invoice_id,
+                    amount=float(amount),
+                )
+                st.session_state["waiting_for_payment"] = True
+                st.session_state["pending_invoice_id"] = invoice_id
+
+                st.info(
+                    "📲 STK push sent! Complete payment on your phone, then click "
+                    "**'I have paid – Check Status'** below."
+                )
+
+    # Manual status check (one-shot, no polling loop)
+    invoice_id = st.session_state.get("pending_invoice_id")
+    if invoice_id:
+        if st.button("✅ I have paid – Check Status", key=status_button_key):
+            with st.spinner("Checking payment status..."):
+                status = check_payment_status(invoice_id)
+
+            if status is True:
+                mark_invoice_paid(invoice_id)
+                st.session_state["waiting_for_payment"] = False
+                st.session_state["pending_invoice_id"] = None
+                st.success("Payment confirmed! Refreshing...")
+                st.rerun()
+            elif status is False:
+                st.error(
+                    "Payment failed or was cancelled. Please try again or initiate a new STK push."
+                )
+            else:
+                st.warning(
+                    "Payment is still pending. If you've just approved it on your phone, "
+                    "wait a few seconds and click the button again."
+                )
+
+
+def premium_download_section(
+    title: str,
+    markdown_content: str,
+    filename_base: str,
+    amount: int = 1500,
+    *,
+    user_is_paid: bool,
+    user_id: str,
+) -> None:
+    """
+    Reusable premium section:
+
+    - Copy-protected preview of markdown_content
+    - If user is paid -> show 3 download buttons (MD, DOCX, PDF)
+    - If not paid -> show M-Pesa payment form + check status flow
+    """
+    if not markdown_content.strip():
+        st.info(f"Your {title.lower()} will appear here after you run the analysis in the Setup tab.")
+        return
+
+    st.markdown(
+        f"Below is your **{title}**. "
+        "Preview is free. To download in any format, unlock Premium access."
+    )
+
+    # Copy-protected preview wrapper
+    st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
+    # For both resume and cover letter, treat as Markdown for display
+    st.markdown(markdown_content)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    col_md, col_docx, col_pdf = st.columns(3)
+
+    if user_is_paid:
+        # Premium: ALL downloads (Markdown, DOCX, PDF)
+        docx_bytes = to_docx(markdown_content)
+        pdf_bytes = to_pdf(markdown_content)
+
+        with col_md:
+            st.download_button(
+                label="⬇️ Download as Markdown",
+                data=markdown_content,
+                file_name=f"{filename_base}.md",
+                mime="text/markdown",
+            )
+
+        with col_docx:
+            st.download_button(
+                label="⬇️ Download as Word (DOCX)",
+                data=docx_bytes,
+                file_name=f"{filename_base}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+
+        with col_pdf:
+            st.download_button(
+                label="⬇️ Download as PDF",
+                data=pdf_bytes,
+                file_name=f"{filename_base}.pdf",
+                mime="application/pdf",
+            )
+    else:
+        with col_docx:
+            render_payment_gate(feature_name=title, amount=amount, user_id=user_id)
+
+        with col_pdf:
+            st.info(f"Premium required to download your {title.lower()} in any format.")
+
+
+# ============================================================
 # Main App
 # ============================================================
 
 st.set_page_config(page_title="AI Career Accelerator", layout="wide")
 init_state()
+
+# Ensure we have a persistent user id
+user_id = get_or_create_user_id()
+user_is_paid = is_user_paid(user_id)
+
+# If we were waiting for payment and DB now says paid (via webhook),
+# show confirmation and rerun once.
+if st.session_state.get("waiting_for_payment") and user_is_paid:
+    st.success("Payment confirmed! Refreshing...")
+    st.session_state["waiting_for_payment"] = False
+    st.session_state["pending_invoice_id"] = None
+    st.rerun()
 
 # ====== Copy Protection CSS (Preview Only) ==================
 st.markdown(
@@ -232,7 +482,7 @@ st.caption("Upload your resume, paste a job description, and generate a complete
 
 
 # ============================================================
-# Sidebar - Resume Input & API Key (SaaS Mode)
+# Sidebar - Resume Input
 # ============================================================
 
 with st.sidebar:
@@ -287,20 +537,6 @@ with st.sidebar:
         )
         st.caption("Tip: A rough outline is enough. The AI will polish it into a professional resume.")
 
-    # API key for Gemini
-    if "GEMINI_API_KEY" in st.secrets:
-        st.session_state.api_key = st.secrets["GEMINI_API_KEY"]
-        st.markdown("✅ **Pro Access Enabled**")
-    else:
-        st.text_input(
-            "Google Gemini API Key",
-            type="password",
-            key="api_key",
-            help="Get your key at https://aistudio.google.com/app/apikey",
-        )
-        if st.session_state.api_key:
-            st.success("API Key detected.")
-
 
 # ============================================================
 # Main Tabs
@@ -333,9 +569,7 @@ with tab_setup:
         )
 
     if analyze_btn:
-        if not st.session_state.api_key:
-            st.error("Please enter your Google Gemini API key in the sidebar.")
-        elif not st.session_state.resume_text.strip():
+        if not st.session_state.resume_text.strip():
             st.error("Please provide your resume details (upload a PDF or enter text manually).")
         elif not st.session_state.job_description.strip():
             st.error("Please paste the full job description.")
@@ -344,7 +578,6 @@ with tab_setup:
                 with st.spinner("Analyzing job description..."):
                     job_analysis = analyze_job(
                         st.session_state.job_description,
-                        st.session_state.api_key,
                     )
                     st.session_state.job_analysis_json = job_analysis
 
@@ -352,7 +585,6 @@ with tab_setup:
                     rewritten_resume = rewrite_resume(
                         st.session_state.resume_text,
                         st.session_state.job_analysis_json,
-                        st.session_state.api_key,
                     )
                 st.session_state.final_resume_text = rewritten_resume
 
@@ -360,22 +592,24 @@ with tab_setup:
                     cover_letter = generate_cover_letter(
                         st.session_state.resume_text,
                         st.session_state.job_analysis_json,
-                        st.session_state.api_key,
                     )
-                    st.session_state.cover_letter_text = cover_letter
+                st.session_state.cover_letter_text = cover_letter
 
                 with st.spinner("Creating follow-up email strategy."):
                     emails = generate_emails(
                         st.session_state.job_analysis_json,
-                        st.session_state.api_key,
                     )
-                    st.session_state.follow_up_emails = emails
+                st.session_state.follow_up_emails = emails
 
                 st.success("✅ All done! Check the other tabs for your Application Kit.")
                 st.balloons()
 
             except Exception as e:
-                st.error(f"❌ Error during processing: {str(e)}")
+                msg = str(e)
+                if "Service temporarily unavailable" in msg:
+                    st.error("Service temporarily unavailable")
+                else:
+                    st.error(f"❌ Error during processing: {msg}")
 
     if st.session_state.job_analysis_json:
         st.subheader("Job Analysis Summary")
@@ -395,222 +629,33 @@ with tab_setup:
 
 
 # ------------------------------------------------------------
-# TAB 2: Tailored Resume (Hard Paywall + IntaSend + Copy Protection)
+# TAB 2: Tailored Resume (Premium section)
 # ------------------------------------------------------------
 with tab_resume:
     st.header("3. Tailored Resume")
-
-    if st.session_state.final_resume_text:
-        resume_md = st.session_state.final_resume_text
-
-        st.markdown(
-            "Below is your **ATS-optimized resume** in Markdown. "
-            "Preview is free. To download in any format, unlock Premium access."
-        )
-
-        # Copy-protected preview wrapper
-        st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
-        st.markdown(resume_md)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        col_md, col_docx, col_pdf = st.columns(3)
-
-        if st.session_state.is_paid:
-            # Premium: ALL downloads (Markdown, DOCX, PDF)
-            resume_docx = to_docx(resume_md)
-            resume_pdf = to_pdf(resume_md)
-
-            with col_md:
-                st.download_button(
-                    label="⬇️ Download as Markdown",
-                    data=resume_md,
-                    file_name="tailored_resume.md",
-                    mime="text/markdown",
-                )
-
-            with col_docx:
-                st.download_button(
-                    label="⬇️ Download as Word (DOCX)",
-                    data=resume_docx,
-                    file_name="tailored_resume.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-
-            with col_pdf:
-                st.download_button(
-                    label="⬇️ Download as PDF",
-                    data=resume_pdf,
-                    file_name="tailored_resume.pdf",
-                    mime="application/pdf",
-                )
-        else:
-            # Hard paywall: no downloads, only Premium Unlock UI
-            with col_docx:
-                st.markdown("### 🔓 Premium Unlock")
-                st.write("Unlock **all resume downloads** (Markdown, Word, PDF) for:")
-                st.write("**KES 1,500**")
-
-                phone_input_resume = st.text_input(
-                    "M-Pesa Number (via IntaSend)",
-                    placeholder="0712345678",
-                    key="mpesa_phone_resume",
-                )
-
-                if st.button("Pay KES 1,500", key="pay_resume"):
-                    if not phone_input_resume:
-                        st.error("Please enter your M-Pesa phone number.")
-                    else:
-                        with st.spinner("Sending IntaSend payment request to your phone..."):
-                            invoice_id = trigger_mpesa_payment(
-                                phone_number=phone_input_resume,
-                                amount=1500,
-                            )
-
-                        if not invoice_id:
-                            st.error("Unable to initiate payment via IntaSend. Please try again.")
-                        else:
-                            st.info("📲 STK Push sent via IntaSend! Check your phone and enter your M-Pesa PIN.")
-                            progress_bar = st.progress(0)
-                            payment_success = False
-                            status = None
-
-                            # Poll up to 45 seconds (15 × 3s)
-                            for i in range(15):
-                                time.sleep(3)
-                                status = check_payment_status(invoice_id)
-                                progress_bar.progress(int((i + 1) / 15 * 100))
-
-                                if status is True:
-                                    payment_success = True
-                                    break
-                                elif status is False:
-                                    st.error("Payment failed or was cancelled.")
-                                    break
-
-                            if payment_success:
-                                st.success("✅ Payment confirmed! Unlocking downloads...")
-                                st.session_state.is_paid = True
-                                time.sleep(1)
-                                st.rerun()
-                            elif status is None:
-                                st.warning("⚠️ Payment timed out. If you completed payment, please refresh.")
-
-            with col_pdf:
-                st.info("Premium required to download your resume in any format.")
-    else:
-        st.info("Your tailored resume will appear here after you run the analysis in the Setup tab.")
+    premium_download_section(
+        title="ATS-Optimized Resume",
+        markdown_content=st.session_state.final_resume_text or "",
+        filename_base="tailored_resume",
+        amount=1500,
+        user_is_paid=user_is_paid,
+        user_id=user_id,
+    )
 
 
 # ------------------------------------------------------------
-# TAB 3: Custom Cover Letter (Hard Paywall + IntaSend + Copy Protection)
+# TAB 3: Custom Cover Letter (Premium section)
 # ------------------------------------------------------------
 with tab_cover:
     st.header("4. Custom Cover Letter")
-
-    if st.session_state.cover_letter_text:
-        cover_text = st.session_state.cover_letter_text
-
-        st.markdown(
-            "Here is your **tailored cover letter**. "
-            "Preview is free. To download in any format, unlock Premium."
-        )
-
-        # Copy-protected preview wrapper (read-only textarea)
-        st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
-        st.text_area(
-            "Cover Letter (Preview Only)",
-            value=cover_text,
-            height=350,
-            disabled=True,
-            key="cover_preview",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        col_txt, col_docx, col_pdf = st.columns(3)
-
-        if st.session_state.is_paid:
-            # Premium: ALL downloads (Text, DOCX, PDF)
-            cover_docx = to_docx(cover_text)
-            cover_pdf = to_pdf(cover_text)
-
-            with col_txt:
-                st.download_button(
-                    label="⬇️ Download as Text",
-                    data=cover_text,
-                    file_name="cover_letter.txt",
-                    mime="text/plain",
-                )
-
-            with col_docx:
-                st.download_button(
-                    label="⬇️ Download as Word (DOCX)",
-                    data=cover_docx,
-                    file_name="cover_letter.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-
-            with col_pdf:
-                st.download_button(
-                    label="⬇️ Download as PDF",
-                    data=cover_pdf,
-                    file_name="cover_letter.pdf",
-                    mime="application/pdf",
-                )
-        else:
-            # Hard paywall: no downloads, only Premium Unlock UI
-            with col_docx:
-                st.markdown("### 🔓 Premium Unlock")
-                st.write("Unlock **all cover letter downloads** (Text, Word, PDF) for:")
-                st.write("**KES 1,500**")
-
-                phone_input_cover = st.text_input(
-                    "M-Pesa Number (via IntaSend)",
-                    placeholder="0712345678",
-                    key="mpesa_phone_cover",
-                )
-
-                if st.button("Pay KES 1,500", key="pay_cover"):
-                    if not phone_input_cover:
-                        st.error("Please enter your M-Pesa phone number.")
-                    else:
-                        with st.spinner("Sending IntaSend payment request to your phone..."):
-                            invoice_id = trigger_mpesa_payment(
-                                phone_number=phone_input_cover,
-                                amount=1500,
-                            )
-
-                        if not invoice_id:
-                            st.error("Unable to initiate payment via IntaSend. Please try again.")
-                        else:
-                            st.info("📲 STK Push sent via IntaSend! Check your phone and enter your M-Pesa PIN.")
-                            progress_bar = st.progress(0)
-                            payment_success = False
-                            status = None
-
-                            for i in range(15):
-                                time.sleep(3)
-                                status = check_payment_status(invoice_id)
-                                progress_bar.progress(int((i + 1) / 15 * 100))
-
-                                if status is True:
-                                    payment_success = True
-                                    break
-                                elif status is False:
-                                    st.error("Payment failed or was cancelled.")
-                                    break
-
-                            if payment_success:
-                                st.success("✅ Payment confirmed! Unlocking downloads...")
-                                st.session_state.is_paid = True
-                                time.sleep(1)
-                                st.rerun()
-                            elif status is None:
-                                st.warning("⚠️ Payment timed out. If you completed payment, please refresh.")
-
-            with col_pdf:
-                st.info("Premium required to download your cover letter in any format.")
-    else:
-        st.info("Your cover letter will appear here after you run the analysis in the Setup tab.")
+    premium_download_section(
+        title="Custom Cover Letter",
+        markdown_content=st.session_state.cover_letter_text or "",
+        filename_base="cover_letter",
+        amount=1500,
+        user_is_paid=user_is_paid,
+        user_id=user_id,
+    )
 
 
 # ------------------------------------------------------------
