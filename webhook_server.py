@@ -1,4 +1,3 @@
-# webhook_server.py
 """
 FastAPI server to receive IntaSend webhooks and mark payments as paid.
 
@@ -10,6 +9,10 @@ app.py starts this in a background thread:
 
 Expose a POST /intasend/webhook endpoint and configure that URL in your
 IntaSend dashboard as the webhook target.
+
+Example webhook URL in IntaSend:
+    https://<your-streamlit-domain>/intasend/webhook
+    (ensure it is routed to this FastAPI server)
 """
 
 from typing import Any, Dict
@@ -40,6 +43,8 @@ async def intasend_webhook(request: Request):
     We only care about:
         - invoice_id / invoice
         - state / status
+
+    Any status in {"PAID", "COMPLETED", "SUCCESS"} is treated as a successful payment.
     """
     try:
         payload: Dict[str, Any] = await request.json()

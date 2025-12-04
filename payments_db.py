@@ -1,4 +1,3 @@
-# payments_db.py
 """
 SQLite-backed payment storage for the AI Career Accelerator.
 
@@ -31,7 +30,12 @@ DB_PATH = Path(__file__).with_name("payments.db")
 
 @contextmanager
 def get_connection():
-    # Isolation level None enables autocommit; we’ll manage commits explicitly.
+    """
+    Context manager that yields a SQLite connection.
+
+    The DB is a simple local file and used only by this app, so we don't
+    need advanced pooling. Each call opens/closes a connection.
+    """
     conn = sqlite3.connect(DB_PATH)
     try:
         yield conn
@@ -68,7 +72,7 @@ def create_payment(
     Insert a new payment intent row.
 
     If the invoice_id already exists, this is a no-op to avoid blowing up
-    on retries.
+    on retries or duplicate webhook events.
     """
     if not invoice_id:
         return
