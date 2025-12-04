@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 import streamlit as st
 import google.generativeai as genai
@@ -29,7 +29,7 @@ def _get_api_key() -> str:
 
     Raises a RuntimeError with a clear message if not found.
     """
-    key: str | None = None
+    key: Optional[str] = None
 
     # 1) Streamlit secrets
     try:
@@ -115,7 +115,7 @@ def _extract_json_block(raw: str) -> str:
     return raw.strip()
 
 
-def _safe_json_loads(raw: str | None) -> Any:
+def _safe_json_loads(raw: Optional[str]) -> Any:
     """
     Attempt to parse JSON from a possibly noisy model response.
     Raises ValueError if nothing usable is found.
@@ -146,7 +146,7 @@ def extract_text_from_pdf(file) -> str:
 
     try:
         reader = pypdf.PdfReader(file)
-        texts: list[str] = []
+        texts: List[str] = []
         for page in reader.pages:
             text = page.extract_text() or ""
             if text.strip():
@@ -371,7 +371,7 @@ No extra text. No explanation. JSON only.
         if not isinstance(data, list):
             return []
 
-        normalized: list[dict[str, str]] = []
+        normalized: List[Dict[str, str]] = []
         for item in data[:3]:
             if not isinstance(item, dict):
                 continue

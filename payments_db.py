@@ -1,208 +1,213 @@
 """
-Secure, thread-safe SQLite payment database for AI Career Accelerator.
-Used by both Streamlit (app.py) and FastAPI webhook (webhook_server.py).
+IntaSend M-Pesa integration with proper logging, retries, and validation.
 """
 
 import os
-import sqlite3
-import threading
+import re
 import logging
-from contextlib import contextmanager
-from datetime import datetime
-from pathlib import Path
+from typing import Optional
 
-# ----------------------------------------------------------------------
+import requests
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+
+# ------------------------------------------------------------
 # Logging
-# ----------------------------------------------------------------------
+# ------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
+    # Basic config only if not already configured by the host app
     logging.basicConfig(level=logging.INFO)
 
-# ----------------------------------------------------------------------
-# Database location — works locally and on Streamlit Cloud / Railway / Render
-# ----------------------------------------------------------------------
 
-DB_PATH = Path(os.getenv("PAYMENTS_DB_PATH", Path(__file__).with_name("payments.db")))
+# ------------------------------------------------------------
+# Requests session with retries
+# ------------------------------------------------------------
 
-# Thread lock to prevent SQLite "database is locked" errors under concurrent access
-_db_lock = threading.Lock()
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
 
 
-@contextmanager
-def get_connection():
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+
+def normalize_phone(phone_number: str) -> str:
     """
-    Thread-safe connection context manager.
+    Normalize to 2547XXXXXXXX format.
 
-    - Uses WAL mode for better concurrency (critical when webhook + Streamlit hit DB).
-    - check_same_thread=False so we can share the DB across threads (webhook + app).
-    - isolation_level=None → autocommit mode (each statement is its own transaction).
+    Accepts:
+    - 07xxxxxxxx
+    - 01xxxxxxxx
+    - 7xxxxxxxx
+    - 1xxxxxxxx
+    - 2547xxxxxxxx
+    - 2541xxxxxxxx
+    - +2547xxxxxxxx
+    - +2541xxxxxxxx
     """
-    with _db_lock:
-        conn = sqlite3.connect(
-            str(DB_PATH),
-            timeout=30.0,
-            check_same_thread=False,
-            isolation_level=None,  # autocommit; commit/rollback are mostly no-ops
-        )
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        try:
-            yield conn
-            # In autocommit mode, this is mostly harmless, but kept for clarity
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    if not phone_number:
+        return ""
+
+    digits = re.sub(r"\D", "", phone_number)
+
+    # 07xxxxxxxx or 01xxxxxxxx → 2547/1xxxxxxxx
+    if len(digits) == 10 and digits.startswith(("07", "01")):
+        return "254" + digits[1:]
+
+    # 7xxxxxxxx or 1xxxxxxxx → 2547/1xxxxxxxx
+    if len(digits) == 9 and digits[0] in {"7", "1"}:
+        return "254" + digits
+
+    # Already in 2547xxxxxxxx or 2541xxxxxxxx format
+    if digits.startswith("254") and len(digits) == 12:
+        return digits
+
+    logger.warning(f"Invalid phone number format: {phone_number} -> {digits}")
+    return ""
 
 
-def init_db() -> None:
-    """Create table + performance indexes if they don't exist."""
-    with get_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS payments (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT NOT NULL,
-                phone       TEXT NOT NULL,
-                invoice_id  TEXT NOT NULL UNIQUE,
-                amount      REAL NOT NULL CHECK(amount > 0),
-                paid_at     TEXT,
-                is_paid     INTEGER NOT NULL DEFAULT 0 CHECK(is_paid IN (0, 1)),
-                created_at  TEXT DEFAULT (datetime('now')),
-                updated_at  TEXT DEFAULT (datetime('now'))
-            )
-            """
-        )
-
-        # Critical indexes for fast lookups
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON payments(user_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_user_paid "
-            "ON payments(user_id, is_paid) WHERE is_paid = 1"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON payments(created_at)")
-
-        logger.info(f"[payments_db] Initialized DB at {DB_PATH}")
-
-
-def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> bool:
+def get_intasend_config() -> dict:
     """
-    Insert payment record (idempotent).
-    Returns True if a new row was inserted, False otherwise.
+    Read IntaSend config from environment variables.
+
+    Raises RuntimeError if required keys are missing.
     """
-    if not all([user_id, phone, invoice_id, amount]):
-        return False
+    publishable_key = os.getenv("INTASEND_PUBLISHABLE_KEY")
+    api_key = os.getenv("INTASEND_API_KEY")
+    base_url = os.getenv("INTASEND_BASE_URL", "https://api.intasend.com/api/v1").rstrip("/")
+
+    if not publishable_key or not api_key:
+        raise RuntimeError("IntaSend keys not configured in environment")
+
+    return {
+        "publishable_key": publishable_key,
+        "api_key": api_key,
+        "base_url": base_url,
+    }
+
+
+# ------------------------------------------------------------
+# Public API
+# ------------------------------------------------------------
+
+def trigger_mpesa_payment(
+    phone_number: str,
+    amount: int,
+    api_ref: str = "career-accelerator-premium",
+    *,
+    reference: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Initiate an M-Pesa STK push via IntaSend.
+
+    - `phone_number`: user input (07..., +2547..., etc.), normalized internally.
+    - `amount`: integer amount in KES.
+    - `api_ref` / `reference`: invoice / tracking reference.
+
+    NOTE: `reference` is accepted so calls like trigger_mpesa_payment(..., reference="...")
+    from app.py work without error. If both are provided, `reference` wins.
+    """
+    if amount <= 0:
+        logger.error("Amount must be positive")
+        return None
+
+    msisdn = normalize_phone(phone_number)
+    if len(msisdn) != 12:
+        logger.error(f"Invalid phone after normalization: {msisdn}")
+        return None
+
+    # Allow app.py to pass `reference=` or fall back to `api_ref`
+    ref = reference or api_ref or "career-accelerator-premium"
 
     try:
-        with get_connection() as conn:
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO payments (user_id, phone, invoice_id, amount, is_paid)
-                VALUES (?, ?, ?, ?, 0)
-                """,
-                (user_id, phone, invoice_id, float(amount)),
-            )
-            inserted = cursor.rowcount > 0
-            if inserted:
-                logger.info(
-                    f"[payments_db] Created payment: user_id={user_id}, "
-                    f"invoice_id={invoice_id}, amount={amount}"
-                )
-            return inserted
-    except sqlite3.IntegrityError:
-        # Duplicate invoice_id — expected and safe (INSERT OR IGNORE handles it)
-        logger.warning(
-            f"[payments_db] Duplicate invoice_id (ignored): invoice_id={invoice_id}"
-        )
-        return False
+        cfg = get_intasend_config()
+    except RuntimeError as e:
+        # Don't crash the app if IntaSend isn't configured; just log and return None
+        logger.error(f"IntaSend configuration error: {e}")
+        return None
+
+    url = f"{cfg['base_url']}/payment/mpesa-stk-push/"
+
+    payload = {
+        "amount": str(int(amount)),
+        "phone_number": msisdn,
+        "api_ref": ref,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = session.post(url, json=payload, headers=headers, timeout=20)
+        logger.info(f"STK Push Response: {resp.status_code} {resp.text}")
+        resp.raise_for_status()
+        data = resp.json()
+        # IntaSend may return invoice_id or invoice
+        invoice_id = data.get("invoice_id") or data.get("invoice")
+        if invoice_id:
+            return str(invoice_id)
+
+        logger.error(f"No invoice_id in response: {data}")
     except Exception as e:
-        logger.error(f"[payments_db] create_payment error: {e}")
-        return False
+        logger.error(f"STK push failed: {e}")
+
+    return None
 
 
-def mark_invoice_paid(invoice_id: str) -> bool:
+def check_payment_status(invoice_id: str) -> Optional[bool]:
     """
-    Atomically mark invoice as paid.
-    Returns True only if a row was actually updated (prevents double-marking).
+    Check the payment status for a given invoice_id.
+
+    Returns:
+    - True  → payment completed
+    - False → payment failed or cancelled
+    - None  → still pending or unknown / error
     """
     if not invoice_id:
-        return False
-
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        return None
 
     try:
-        with get_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE payments
-                SET is_paid = 1,
-                    paid_at = ?,
-                    updated_at = datetime('now')
-                WHERE invoice_id = ? AND is_paid = 0
-                """,
-                (now, invoice_id),
-            )
-            updated = cursor.rowcount > 0
-            if updated:
-                logger.info(
-                    f"[payments_db] Payment confirmed: invoice_id={invoice_id}, "
-                    f"paid_at={now}"
-                )
-            else:
-                logger.info(
-                    f"[payments_db] mark_invoice_paid: no rows updated "
-                    f"(already paid or unknown invoice_id={invoice_id})"
-                )
-            return updated
-    except Exception as e:
-        logger.error(f"[payments_db] mark_invoice_paid error: {e}")
-        return False
+        cfg = get_intasend_config()
+    except RuntimeError as e:
+        logger.error(f"IntaSend configuration error on status check: {e}")
+        return None
 
+    url = f"{cfg['base_url']}/payment/status/"
 
-def is_user_paid(user_id: str) -> bool:
-    """
-    Fast check: does this user have at least one confirmed payment?
-    """
-    if not user_id:
-        return False
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {"invoice_id": invoice_id}
 
     try:
-        with get_connection() as conn:
-            cursor = conn.execute(
-                """
-                SELECT 1 FROM payments
-                WHERE user_id = ? AND is_paid = 1
-                LIMIT 1
-                """,
-                (user_id,),
-            )
-            paid = cursor.fetchone() is not None
-            return paid
+        resp = session.post(url, json=payload, headers=headers, timeout=15)
+        logger.info(f"Status check: {resp.status_code} {resp.text}")
+        resp.raise_for_status()
+
+        data = resp.json()
+        status = (data.get("state") or data.get("status") or "").upper()
+
+        if status in {"PAID", "COMPLETED", "SUCCESS"}:
+            return True
+        if status in {"FAILED", "CANCELLED", "DECLINED"}:
+            return False
+
+        # PENDING / PROCESSING / UNKNOWN
+        return None
+
     except Exception as e:
-        logger.error(f"[payments_db] is_user_paid error: {e}")
-        return False
-
-
-def get_user_payments(user_id: str):
-    """
-    Debug/admin function — list all payments for a user.
-    Returns a list of dicts.
-    """
-    with get_connection() as conn:
-        cursor = conn.execute(
-            "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        )
-        rows = [dict(row) for row in cursor.fetchall()]
-        return rows
-
-
-# Auto-init on import so both app.py and webhook_server.py
-# can safely assume the table exists.
-init_db()
+        logger.error(f"Status check failed: {e}")
+        return None

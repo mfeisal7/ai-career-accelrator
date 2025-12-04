@@ -1,125 +1,213 @@
 """
-Secure FastAPI webhook server for IntaSend with HMAC signature verification.
-Deploy this separately in production (e.g. Railway, Fly.io, Render).
+IntaSend M-Pesa integration with proper logging, retries, and validation.
 """
 
 import os
-import hmac
-import hashlib
+import re
 import logging
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from typing import Optional
 
-from payments_db import mark_invoice_paid
+import requests
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
-app = FastAPI(title="AI Career Accelerator – IntaSend Webhook")
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
+    # Basic config only if not already configured by the host app
     logging.basicConfig(level=logging.INFO)
 
 
-def verify_intasend_signature(payload: bytes, signature_header: str | None) -> bool:
+# ------------------------------------------------------------
+# Requests session with retries
+# ------------------------------------------------------------
+
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
+
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+
+def normalize_phone(phone_number: str) -> str:
     """
-    Verify IntaSend webhook signature using your secret key.
+    Normalize to 2547XXXXXXXX format.
 
-    - If INTASEND_API_KEY is NOT set, we log a warning and skip verification
-      (fail-open) to make local dev easier.
-    - In production, you MUST set INTASEND_API_KEY so signatures are enforced.
+    Accepts:
+    - 07xxxxxxxx
+    - 01xxxxxxxx
+    - 7xxxxxxxx
+    - 1xxxxxxxx
+    - 2547xxxxxxxx
+    - 2541xxxxxxxx
+    - +2547xxxxxxxx
+    - +2541xxxxxxxx
     """
-    secret = os.getenv("INTASEND_API_KEY")
-    if not secret:
-        logger.warning(
-            "[Webhook] INTASEND_API_KEY not set — skipping signature verification "
-            "(development mode)."
-        )
-        return True  # FAIL-OPEN in dev only
+    if not phone_number:
+        return ""
 
-    if not signature_header:
-        logger.warning("[Webhook] Missing X-IntaSend-Signature header")
-        return False
+    digits = re.sub(r"\D", "", phone_number)
 
-    expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected.lower(), signature_header.lower())
+    # 07xxxxxxxx or 01xxxxxxxx → 2547/1xxxxxxxx
+    if len(digits) == 10 and digits.startswith(("07", "01")):
+        return "254" + digits[1:]
+
+    # 7xxxxxxxx or 1xxxxxxxx → 2547/1xxxxxxxx
+    if len(digits) == 9 and digits[0] in {"7", "1"}:
+        return "254" + digits
+
+    # Already in 2547xxxxxxxx or 2541xxxxxxxx format
+    if digits.startswith("254") and len(digits) == 12:
+        return digits
+
+    logger.warning(f"Invalid phone number format: {phone_number} -> {digits}")
+    return ""
 
 
-@app.post("/intasend/webhook")
-async def intasend_webhook(request: Request):
+def get_intasend_config() -> dict:
     """
-    IntaSend webhook endpoint.
+    Read IntaSend config from environment variables.
 
-    Expects JSON payload with at least:
-    - invoice_id / invoice
-    - state / status
+    Raises RuntimeError if required keys are missing.
     """
-    signature = request.headers.get("X-IntaSend-Signature", "")
+    publishable_key = os.getenv("INTASEND_PUBLISHABLE_KEY")
+    api_key = os.getenv("INTASEND_API_KEY")
+    base_url = os.getenv("INTASEND_BASE_URL", "https://api.intasend.com/api/v1").rstrip("/")
+
+    if not publishable_key or not api_key:
+        raise RuntimeError("IntaSend keys not configured in environment")
+
+    return {
+        "publishable_key": publishable_key,
+        "api_key": api_key,
+        "base_url": base_url,
+    }
+
+
+# ------------------------------------------------------------
+# Public API
+# ------------------------------------------------------------
+
+def trigger_mpesa_payment(
+    phone_number: str,
+    amount: int,
+    api_ref: str = "career-accelerator-premium",
+    *,
+    reference: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Initiate an M-Pesa STK push via IntaSend.
+
+    - `phone_number`: user input (07..., +2547..., etc.), normalized internally.
+    - `amount`: integer amount in KES.
+    - `api_ref` / `reference`: invoice / tracking reference.
+
+    NOTE: `reference` is accepted so calls like trigger_mpesa_payment(..., reference="...")
+    from app.py work without error. If both are provided, `reference` wins.
+    """
+    if amount <= 0:
+        logger.error("Amount must be positive")
+        return None
+
+    msisdn = normalize_phone(phone_number)
+    if len(msisdn) != 12:
+        logger.error(f"Invalid phone after normalization: {msisdn}")
+        return None
+
+    # Allow app.py to pass `reference=` or fall back to `api_ref`
+    ref = reference or api_ref or "career-accelerator-premium"
 
     try:
-        raw_payload = await request.body()
-        if not verify_intasend_signature(raw_payload, signature):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid signature",
-            )
+        cfg = get_intasend_config()
+    except RuntimeError as e:
+        # Don't crash the app if IntaSend isn't configured; just log and return None
+        logger.error(f"IntaSend configuration error: {e}")
+        return None
 
-        # Parse JSON after signature verification
-        payload = await request.json()
-    except HTTPException:
-        # Re-raise HTTPException as-is
-        raise
+    url = f"{cfg['base_url']}/payment/mpesa-stk-push/"
+
+    payload = {
+        "amount": str(int(amount)),
+        "phone_number": msisdn,
+        "api_ref": ref,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = session.post(url, json=payload, headers=headers, timeout=20)
+        logger.info(f"STK Push Response: {resp.status_code} {resp.text}")
+        resp.raise_for_status()
+        data = resp.json()
+        # IntaSend may return invoice_id or invoice
+        invoice_id = data.get("invoice_id") or data.get("invoice")
+        if invoice_id:
+            return str(invoice_id)
+
+        logger.error(f"No invoice_id in response: {data}")
     except Exception as e:
-        logger.error(f"[Webhook] Invalid payload: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
+        logger.error(f"STK push failed: {e}")
 
-    invoice_id = payload.get("invoice_id") or payload.get("invoice")
-    state = (payload.get("state") or payload.get("status") or "").upper()
+    return None
 
+
+def check_payment_status(invoice_id: str) -> Optional[bool]:
+    """
+    Check the payment status for a given invoice_id.
+
+    Returns:
+    - True  → payment completed
+    - False → payment failed or cancelled
+    - None  → still pending or unknown / error
+    """
     if not invoice_id:
-        raise HTTPException(status_code=400, detail="Missing invoice_id")
+        return None
 
-    logger.info(f"[Webhook] Received: invoice_id={invoice_id}, state={state}")
-
-    if state in {"PAID", "COMPLETED", "SUCCESS"}:
-        updated = mark_invoice_paid(invoice_id)
-        return JSONResponse(
-            {
-                "ok": True,
-                "updated": updated,
-                "action": "payment_marked_paid" if updated else "already_paid",
-            }
-        )
-
-    # For non-paid states we just acknowledge so IntaSend stops retrying
-    return JSONResponse(
-        {"ok": True, "ignored": True, "reason": f"state={state!r} not paid"}
-    )
-
-
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "service": "intasend-webhook"}
-
-
-def run(host: str = "0.0.0.0", port: int = 8000):
-    """
-    Start the webhook server with uvicorn.
-
-    - Used by app.py in a background thread.
-    - We import uvicorn lazily so that the rest of the app can run even if
-      uvicorn is not installed (e.g. some dev environments).
-    """
     try:
-        import uvicorn  # type: ignore
-    except ImportError:
-        logger.error(
-            "[Webhook] uvicorn is not installed. "
-            "Install it with `pip install uvicorn` to run the webhook server."
-        )
-        return
+        cfg = get_intasend_config()
+    except RuntimeError as e:
+        logger.error(f"IntaSend configuration error on status check: {e}")
+        return None
 
-    logger.info(f"[Webhook] Starting server on {host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    url = f"{cfg['base_url']}/payment/status/"
 
+    headers = {
+        "Authorization": f"Bearer {cfg['api_key']}",
+        "Content-Type": "application/json",
+    }
 
-if __name__ == "__main__":
-    run()
+    payload = {"invoice_id": invoice_id}
+
+    try:
+        resp = session.post(url, json=payload, headers=headers, timeout=15)
+        logger.info(f"Status check: {resp.status_code} {resp.text}")
+        resp.raise_for_status()
+
+        data = resp.json()
+        status = (data.get("state") or data.get("status") or "").upper()
+
+        if status in {"PAID", "COMPLETED", "SUCCESS"}:
+            return True
+        if status in {"FAILED", "CANCELLED", "DECLINED"}:
+            return False
+
+        # PENDING / PROCESSING / UNKNOWN
+        return None
+
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return None

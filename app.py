@@ -3,6 +3,7 @@ import re
 import uuid
 import threading
 import time
+import os
 from io import BytesIO
 
 import streamlit as st
@@ -90,7 +91,7 @@ def init_state() -> None:
 
 
 # ============================================================
-# Document Export Functions (Fixed & Complete)
+# Document Export Functions
 # ============================================================
 
 def _add_markdown_runs_to_paragraph(paragraph, text: str) -> None:
@@ -193,16 +194,6 @@ def to_pdf(markdown_text: str) -> bytes:
 def _is_valid_kenyan_phone(phone: str) -> bool:
     """
     More robust Kenyan mobile validation.
-
-    Accepts:
-    - 07xxxxxxxx
-    - 01xxxxxxxx
-    - 7xxxxxxxx
-    - 1xxxxxxxx
-    - +2547xxxxxxxx
-    - +2541xxxxxxxx
-    - 2547xxxxxxxx
-    - 2541xxxxxxxx
     """
     phone = phone.strip()
     pattern = r"^(?:\+?254|0)?[17]\d{8}$"
@@ -265,7 +256,7 @@ def premium_download_section(
             else:
                 with st.spinner("Sending STK push..."):
                     invoice_id = trigger_mpesa_payment(
-                        phone=phone,
+                        phone_number=phone,
                         amount=amount,
                         reference=f"{filename_base}_{user_id}",
                     )
@@ -305,6 +296,10 @@ st.markdown("### Transform your job applications with AI — Kenyan jobs, Kenyan
 init_state()
 user_id = get_or_create_user_id()
 user_is_paid = is_user_paid(user_id)
+
+# DEV OVERRIDE: if you want to bypass payments while testing:
+if os.getenv("DISABLE_PAYMENTS_DEV") == "1":
+    user_is_paid = True
 
 col1, col2 = st.columns([1, 2])
 with col1:
