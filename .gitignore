@@ -1,5 +1,5 @@
 # ============================================
-# Python Cache & Build Artifacts
+# PYTHON CACHE & BUILD ARTIFACTS
 # ============================================
 __pycache__/
 *.pyc
@@ -12,7 +12,7 @@ build/
 .eggs/
 
 # ============================================
-# Virtual Environments
+# VIRTUAL ENVIRONMENTS
 # ============================================
 venv/
 venv*/
@@ -20,49 +20,64 @@ venv*/
 .venv*/
 
 # ============================================
-# Streamlit Secrets (Critical — NEVER COMMIT)
+# STREAMLIT SECRETS (CRITICAL — NEVER COMMIT)
 # ============================================
 .streamlit/secrets.toml
 
 # ============================================
-# Environment Variables (Critical)
+# ENVIRONMENT FILES (Critical Keys)
 # ============================================
 .env
 .env.*
 *.env
 
 # ============================================
-# Local Data, Uploads & User Files
+# SQLITE DATABASE (DO NOT COMMIT — USER PAYMENT DATA)
 # ============================================
-# Ignore local PDF, DOCX, TXT, MD files — BUT keep official project files.
-*.pdf
-*.docx
+payments.db
 
-# Ignore all text files EXCEPT required project files
-*.txt
-!requirements.txt
-!README.txt
-!README
+# Backup DB just in case
+*.db
+*.sqlite
+*.sqlite3
 
-# Ignore all markdown files EXCEPT project docs
-*.md
-!README.md
-!SECURITY.md
-
-# User uploads
+# ============================================
+# USER UPLOADS / TEMP STORAGE
+# ============================================
 uploads/
 user_uploads/
 tmp/
 temp/
 
 # ============================================
-# OS-generated files
+# DOCUMENTS GENERATED LOCALLY — NOT PROJECT FILES
+# ============================================
+*.pdf
+*.docx
+
+# ============================================
+# TEXT FILES — ALLOW PROJECT FILES ONLY
+# ============================================
+*.txt
+!requirements.txt
+!README.txt
+!README
+
+# ============================================
+# MARKDOWN — ALLOW REPO DOCS ONLY
+# ============================================
+*.md
+!README.md
+!SECURITY.md
+
+# ============================================
+# OS FILES
 # ============================================
 .DS_Store
 Thumbs.db
 
 # ============================================
-# IDE / Editor junk
+# IDE / EDITOR FILES
 # ============================================
 .vscode/
 .idea/
@@ -70,7 +85,15 @@ Thumbs.db
 *.code-workspace
 
 # ============================================
-# Log files
+# LOG FILES
 # ============================================
 *.log
 logs/
+
+# ============================================
+# NODE / FRONTEND (IF EVER ADDED)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
