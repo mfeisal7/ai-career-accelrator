@@ -111,10 +111,10 @@
         </div>
 
         <!-- CTA Button -->
-        <!-- TODO: When deployed, replace http://localhost:8501/ with your real app URL -->
+        <!-- FINAL LINK TO STREAMLIT APP -->
         <button
           class="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 transition-colors text-white font-bold text-lg py-3 shadow-lg shadow-emerald-500/30"
-          onclick="window.location.href='http://localhost:8501/'"
+          onclick="window.location.href='https://ai-career-accelrator.streamlit.app/'"
         >
           <i class="fa-solid fa-arrow-right text-xl"></i>
           <span>Enter App – Generate My Application Kit</span>
@@ -143,7 +143,7 @@
           <i class="fas fa-file-alt text-emerald-400 text-2xl mb-3"></i>
           <h3 class="font-semibold text-lg mb-1">AI CV + Cover Letter</h3>
           <p class="text-sm text-slate-300">
-            ATS-friendly, customized for Kenyan HR and recruiters, ready for Safaricom, banks, audit firms and tech startups.
+            ATS-friendly, customized for Kenyan HR and recruiters.
           </p>
         </div>
 
@@ -151,7 +151,7 @@
           <i class="fab fa-linkedin text-emerald-400 text-2xl mb-3"></i>
           <h3 class="font-semibold text-lg mb-1">Full LinkedIn Makeover</h3>
           <p class="text-sm text-slate-300">
-            Profile optimization that makes recruiters message you instead of you chasing them.
+            Profile optimization that makes recruiters message you.
           </p>
         </div>
 
@@ -159,23 +159,23 @@
           <i class="fas fa-comments text-emerald-400 text-2xl mb-3"></i>
           <h3 class="font-semibold text-lg mb-1">500+ Kenyan Interview Qs</h3>
           <p class="text-sm text-slate-300">
-            Real questions from Safaricom, KCB, Equity, Deloitte, KRA, tech startups and more – with AI-powered answer frameworks.
+            Real questions from Safaricom, KCB, Deloitte, KRA, tech firms.
           </p>
         </div>
 
         <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
           <i class="fas fa-briefcase text-emerald-400 text-2xl mb-3"></i>
-          <h3 class="font-semibold text-lg mb-1">Hidden Tech &amp; Data Jobs List</h3>
+          <h3 class="font-semibold text-lg mb-1">Hidden Jobs List</h3>
           <p class="text-sm text-slate-300">
-            Manually curated roles from founders, hiring managers and referral-only channels. Updated every week.
+            Hand-picked unseen job opportunities updated weekly.
           </p>
         </div>
 
         <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-5">
           <i class="fas fa-users text-emerald-400 text-2xl mb-3"></i>
-          <h3 class="font-semibold text-lg mb-1">Private Telegram Community</h3>
+          <h3 class="font-semibold text-lg mb-1">Private Telegram Group</h3>
           <p class="text-sm text-slate-300">
-            Daily job alerts, live Q&amp;A, interview feedback and accountability from other Kenyan graduates.
+            Daily alerts, wins, and interview support.
           </p>
         </div>
 
@@ -183,7 +183,7 @@
           <i class="fas fa-trophy text-emerald-400 text-2xl mb-3"></i>
           <h3 class="font-semibold text-lg mb-1">3 Interviews Guarantee</h3>
           <p class="text-sm text-slate-300">
-            Follow the system for 45 days. If you don’t get at least 3 real interviews, we give you a full refund.
+            Get 3 interviews or 100% money-back.
           </p>
         </div>
       </div>
@@ -200,19 +200,19 @@
       <div class="space-y-5">
         <div class="bg-slate-900/90 border border-slate-700 rounded-2xl p-5">
           <p class="text-sm md:text-base text-slate-100">
-            “From B.Com Kisumu → Data Analyst at KCB in 38 days. I had sent over 200 applications before this. This system fixed my CV, LinkedIn and interview answers.”
+            “From B.Com Kisumu → Data Analyst at KCB in 38 days.”
           </p>
           <p class="mt-2 text-xs font-semibold text-slate-400">— Brian, Kisumu</p>
         </div>
         <div class="bg-slate-900/90 border border-slate-700 rounded-2xl p-5">
           <p class="text-sm md:text-base text-slate-100">
-            “Safaricom attachment turned into a permanent role in 21 days. The mock interview prep was exactly what they asked me.”
+            “Safaricom attachment turned permanent in 21 days!”
           </p>
           <p class="mt-2 text-xs font-semibold text-slate-400">— Mercy, Mombasa</p>
         </div>
         <div class="bg-slate-900/90 border border-slate-700 rounded-2xl p-5">
           <p class="text-sm md:text-base text-slate-100">
-            “Deloitte called after 6 months of silence. The new CV + cover letter + LinkedIn positioning changed everything.”
+            “Deloitte finally called after 6 months of silence.”
           </p>
           <p class="mt-2 text-xs font-semibold text-slate-400">— Victor, Nairobi</p>
         </div>
@@ -230,9 +230,6 @@
         <p class="text-sm md:text-base leading-relaxed">
           Get at least <strong>3 real interviews</strong> in 45 days or we refund your 
           <strong>KSh 1,500</strong>. No drama. No stories.
-          Just show that you followed the system (CV uploaded, LinkedIn updated,
-          minimum number of applications sent), and if you still don’t get interviews,
-          we send your money back.
         </p>
       </div>
     </div>
@@ -249,11 +246,7 @@
   <script>
     const countdownEl = document.getElementById("countdown");
 
-    // Set deadline in Nairobi time (EAT = UTC+3)
-    // Example: 31st January 2026, 23:59:59 EAT
-    // Convert that to UTC: 23:59:59 - 3 hours = 20:59:59 UTC
-    // Date.UTC(year, monthIndex, day, hour, minute, second)
-    const deadlineUTC = Date.UTC(2026, 0, 31, 20, 59, 59); // 2026-01-31T20:59:59Z
+    const deadlineUTC = Date.UTC(2026, 0, 31, 20, 59, 59);
 
     function updateCountdown() {
       const now = Date.now();
