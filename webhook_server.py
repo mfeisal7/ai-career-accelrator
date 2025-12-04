@@ -1,85 +1,123 @@
 """
-FastAPI server to receive IntaSend webhooks and mark payments as paid.
-
-app.py starts this in a background thread:
-
-    from webhook_server import run as run_webhook_server
-    ...
-    threading.Thread(target=run_webhook_server, ...)
-
-Expose a POST /intasend/webhook endpoint and configure that URL in your
-IntaSend dashboard as the webhook target.
-
-Example webhook URL in IntaSend:
-    https://<your-streamlit-domain>/intasend/webhook
-    (ensure it is routed to this FastAPI server)
+Secure FastAPI webhook server for IntaSend with HMAC signature verification.
+Deploy this separately in production (e.g. Railway, Fly.io, Render).
 """
 
-from typing import Any, Dict
-
-from fastapi import FastAPI, Request
+import os
+import hmac
+import hashlib
+import logging
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse
-import uvicorn
 
 from payments_db import mark_invoice_paid
 
-app = FastAPI(title="IntaSend Webhook Server")
+app = FastAPI(title="AI Career Accelerator – IntaSend Webhook")
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+
+
+def verify_intasend_signature(payload: bytes, signature_header: str | None) -> bool:
+    """
+    Verify IntaSend webhook signature using your secret key.
+
+    - If INTASEND_API_KEY is NOT set, we log a warning and skip verification
+      (fail-open) to make local dev easier.
+    - In production, you MUST set INTASEND_API_KEY so signatures are enforced.
+    """
+    secret = os.getenv("INTASEND_API_KEY")
+    if not secret:
+        logger.warning(
+            "[Webhook] INTASEND_API_KEY not set — skipping signature verification "
+            "(development mode)."
+        )
+        return True  # FAIL-OPEN in dev only
+
+    if not signature_header:
+        logger.warning("[Webhook] Missing X-IntaSend-Signature header")
+        return False
+
+    expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected.lower(), signature_header.lower())
 
 
 @app.post("/intasend/webhook")
 async def intasend_webhook(request: Request):
     """
-    Handle IntaSend webhook callbacks.
+    IntaSend webhook endpoint.
 
-    Expected payload (fields may vary slightly depending on IntaSend version):
-
-        {
-          "invoice_id": "INV_12345",
-          "invoice": "INV_12345",         # sometimes used instead
-          "state": "PAID",                # or "status": "COMPLETED", etc.
-          ...
-        }
-
-    We only care about:
-        - invoice_id / invoice
-        - state / status
-
-    Any status in {"PAID", "COMPLETED", "SUCCESS"} is treated as a successful payment.
+    Expects JSON payload with at least:
+    - invoice_id / invoice
+    - state / status
     """
+    signature = request.headers.get("X-IntaSend-Signature", "")
+
     try:
-        payload: Dict[str, Any] = await request.json()
-    except Exception:
-        return JSONResponse({"detail": "Invalid JSON"}, status_code=400)
+        raw_payload = await request.body()
+        if not verify_intasend_signature(raw_payload, signature):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid signature",
+            )
+
+        # Parse JSON after signature verification
+        payload = await request.json()
+    except HTTPException:
+        # Re-raise HTTPException as-is
+        raise
+    except Exception as e:
+        logger.error(f"[Webhook] Invalid payload: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
     invoice_id = payload.get("invoice_id") or payload.get("invoice")
-    status_raw = payload.get("state") or payload.get("status") or ""
-    status = str(status_raw).upper()
+    state = (payload.get("state") or payload.get("status") or "").upper()
 
     if not invoice_id:
-        return JSONResponse({"detail": "Missing invoice_id"}, status_code=400)
+        raise HTTPException(status_code=400, detail="Missing invoice_id")
 
-    # Treat PAID/COMPLETED/SUCCESS as success
-    if status in {"PAID", "COMPLETED", "SUCCESS"}:
-        mark_invoice_paid(invoice_id)
-        return {"ok": True, "updated": True}
+    logger.info(f"[Webhook] Received: invoice_id={invoice_id}, state={state}")
 
-    # For other states we just acknowledge the webhook
-    return {"ok": True, "updated": False, "status": status}
-
-
-def run(host: str = "0.0.0.0", port: int = 8000) -> None:
-    """
-    Entrypoint used by app.py's background thread.
-
-    Example (already in your app.py):
-
-        thread = threading.Thread(
-            target=run_webhook_server,
-            kwargs={"host": "0.0.0.0", "port": 8000},
-            daemon=True,
+    if state in {"PAID", "COMPLETED", "SUCCESS"}:
+        updated = mark_invoice_paid(invoice_id)
+        return JSONResponse(
+            {
+                "ok": True,
+                "updated": updated,
+                "action": "payment_marked_paid" if updated else "already_paid",
+            }
         )
-        thread.start()
+
+    # For non-paid states we just acknowledge so IntaSend stops retrying
+    return JSONResponse(
+        {"ok": True, "ignored": True, "reason": f"state={state!r} not paid"}
+    )
+
+
+@app.get("/")
+async def health_check():
+    return {"status": "ok", "service": "intasend-webhook"}
+
+
+def run(host: str = "0.0.0.0", port: int = 8000):
     """
+    Start the webhook server with uvicorn.
+
+    - Used by app.py in a background thread.
+    - We import uvicorn lazily so that the rest of the app can run even if
+      uvicorn is not installed (e.g. some dev environments).
+    """
+    try:
+        import uvicorn  # type: ignore
+    except ImportError:
+        logger.error(
+            "[Webhook] uvicorn is not installed. "
+            "Install it with `pip install uvicorn` to run the webhook server."
+        )
+        return
+
+    logger.info(f"[Webhook] Starting server on {host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

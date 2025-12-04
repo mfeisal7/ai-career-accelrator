@@ -1,14 +1,6 @@
-# agents.py
 """
 AI helpers for the AI Career Accelerator app.
-
-This module is responsible for:
-- Configuring Gemini
-- Extracting text from uploaded PDFs
-- Analyzing job descriptions
-- Rewriting resumes to premium Kenyan-standard
-- Generating tailored cover letters
-- Generating follow-up email sequences
+All Gemini calls, PDF extraction, and structured generation happen here.
 """
 
 from __future__ import annotations
@@ -21,151 +13,147 @@ from typing import Dict, List, Any
 import streamlit as st
 import google.generativeai as genai
 import pypdf
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 # ============================================================
-# Gemini Configuration Helpers
+# Gemini Configuration
 # ============================================================
 
 def _get_api_key() -> str:
     """
-    Load Gemini API key from secure backend only.
+    Resolve the Gemini API key from (in order):
+    1. st.secrets["GEMINI_API_KEY"]
+    2. env var GEMINI_API_KEY
+    3. st.session_state["GEMINI_API_KEY"] (for manual input if you wire it in the UI)
 
-    Priority:
-      1. st.secrets["GEMINI_API_KEY"]
-      2. Environment variable GEMINI_API_KEY
-
-    Raises:
-        RuntimeError if not configured.
+    Raises a RuntimeError with a clear message if not found.
     """
+    key: str | None = None
+
     # 1) Streamlit secrets
     try:
-        key = st.secrets["GEMINI_API_KEY"]
-        if key:
-            return key
+        if "GEMINI_API_KEY" in st.secrets:
+            candidate = st.secrets["GEMINI_API_KEY"]
+            if candidate:
+                key = candidate
     except Exception:
+        # If secrets not configured, just fall through
         pass
 
     # 2) Environment variable
-    key = os.getenv("GEMINI_API_KEY")
-    if key:
-        return key
+    if not key:
+        env_key = os.getenv("GEMINI_API_KEY")
+        if env_key:
+            key = env_key
 
-    raise RuntimeError(
-        "Gemini API key is not configured. "
-        "Set GEMINI_API_KEY in .streamlit/secrets.toml or as an environment variable."
-    )
+    # 3) Session state (optional, for manual-input UI)
+    if not key:
+        session_key = st.session_state.get("GEMINI_API_KEY")
+        if session_key:
+            key = session_key
+
+    if not key:
+        raise RuntimeError(
+            "Gemini API key is not configured. "
+            "Set GEMINI_API_KEY in Streamlit secrets, environment, "
+            "or st.session_state['GEMINI_API_KEY']."
+        )
+
+    return key
 
 
-def _get_gemini_model() -> genai.GenerativeModel:
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def _get_gemini_model():
     """
-    Configure Gemini with the backend API key and return a single, known-good model.
+    Configure the Gemini client and return a GenerativeModel instance.
 
-    We use 'gemini-1.5-flash', which is supported on the v1beta consumer API.
+    Retries on transient failures (network, rate limits, etc.)
+    due to the tenacity decorator.
     """
     api_key = _get_api_key()
     genai.configure(api_key=api_key)
-
-    model_name = "gemini-1.5-flash"
-
-    try:
-        model = genai.GenerativeModel(model_name)
-        return model
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to initialize Gemini model '{model_name}'. "
-            f"Check your API key, billing, or project settings. Underlying error: {e}"
-        )
+    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    return genai.GenerativeModel(model_name)
 
 
 # ============================================================
-# JSON Extraction Helper
+# JSON Helpers
 # ============================================================
 
 def _extract_json_block(raw: str) -> str:
     """
-    Attempt to extract the first plausible JSON object or array from a
-    free-form LLM response.
-
-    Handles cases where the model wraps JSON in markdown fences or adds
-    explanatory text.
+    Try to pull out a JSON object/array from a possibly messy LLM response.
+    Supports fenced code blocks and bare { ... } / [ ... ].
     """
     if not raw:
         return raw
 
-    # Common pattern: ```json { ... } ```
+    # ```json ... ```
     fenced = re.search(r"```json(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
     if fenced:
         return fenced.group(1).strip()
 
-    # Any fenced code block: ``` { ... } ```
+    # ``` ... ``` (any language)
     fenced_any = re.search(r"```(.*?)```", raw, flags=re.DOTALL)
     if fenced_any:
         candidate = fenced_any.group(1).strip()
         if candidate.startswith("{") or candidate.startswith("["):
             return candidate
 
-    # Fallback: first {...} block
-    brace_match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-    if brace_match:
-        return brace_match.group(0).strip()
+    # First {...} block
+    brace = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if brace:
+        return brace.group(0)
 
-    # Or array [...]
-    array_match = re.search(r"\[.*\]", raw, flags=re.DOTALL)
-    if array_match:
-        return array_match.group(0).strip()
+    # First [...] block
+    array = re.search(r"\[.*\]", raw, flags=re.DOTALL)
+    if array:
+        return array.group(0)
 
+    # Fallback: return as-is
     return raw.strip()
 
 
-def _safe_json_loads(raw: str) -> Any:
+def _safe_json_loads(raw: str | None) -> Any:
     """
-    Robust JSON loader for LLM output.
+    Attempt to parse JSON from a possibly noisy model response.
+    Raises ValueError if nothing usable is found.
     """
     if not raw:
-        raise ValueError("Empty LLM response when JSON was expected.")
+        raise ValueError("Empty response from model")
 
-    # Try direct parse first
+    # First attempt: direct JSON
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        pass
-
-    # Try extracting a JSON block
-    candidate = _extract_json_block(raw)
-    return json.loads(candidate)
+        # Second attempt: extract JSON-looking block from raw
+        candidate = _extract_json_block(raw)
+        return json.loads(candidate)
 
 
 # ============================================================
-# PDF Text Extraction
+# PDF Extraction
 # ============================================================
 
 def extract_text_from_pdf(file) -> str:
     """
-    Extract text from an uploaded PDF file using pypdf.
-
-    Returns a single string containing the combined text.
-    If the PDF appears to be scanned / image-only, the text
-    may be empty and the caller should handle that case.
+    Extract text from an uploaded PDF (Streamlit's UploadedFile or a file-like object).
+    Returns the concatenated text of all pages, separated by blank lines.
     """
     if file is None:
         return ""
 
     try:
         reader = pypdf.PdfReader(file)
-    except Exception as e:
-        raise RuntimeError(f"Failed to read PDF file: {e}")
-
-    texts: List[str] = []
-    for page_index, page in enumerate(reader.pages):
-        try:
+        texts: list[str] = []
+        for page in reader.pages:
             text = page.extract_text() or ""
-        except Exception:  # defensive for weird PDFs
-            text = ""
-        if text.strip():
-            texts.append(text.strip())
-
-    return "\n\n".join(texts)
+            if text.strip():
+                texts.append(text.strip())
+        return "\n\n".join(texts)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read PDF: {e}")
 
 
 # ============================================================
@@ -174,351 +162,231 @@ def extract_text_from_pdf(file) -> str:
 
 def analyze_job(job_description: str) -> Dict[str, Any]:
     """
-    Analyze a job description and return a structured JSON summary.
-
-    The structure is designed to be:
-    - Human-readable when shown in the UI
-    - Machine-usable by rewrite_resume / generate_cover_letter / generate_emails
+    Call Gemini to analyze a job description into a structured JSON schema.
     """
-    if not job_description or not job_description.strip():
-        raise ValueError("Job description is empty.")
+    if not job_description.strip():
+        raise ValueError("Job description is empty")
 
     model = _get_gemini_model()
 
     prompt = f"""
-You are an expert Kenyan recruiter and hiring manager for top employers
-like Safaricom, KCB, Deloitte, Microsoft ADC, Twiga and UN agencies.
+You are an expert Kenyan recruiter working for top employers like Safaricom, KCB, Equity Bank, Deloitte, PwC, UN, Microsoft ADC, and Twiga Foods.
 
-Your task is to analyze the following job description and return a
-single JSON object ONLY (no commentary, no markdown).
+Analyze the following job description and return ONLY a valid JSON object with no markdown, no explanation.
 
 JOB DESCRIPTION:
 \"\"\"{job_description}\"\"\"
 
 
-Return JSON with the following shape:
+Return JSON with exactly these keys:
 
 {{
-  "role_name": "string - best guess at the role title",
-  "company_name": "string - best guess at the employer (or 'Confidential' if unknown)",
-  "seniority": "Entry-level / Mid-level / Senior / Internship / Graduate Trainee",
-  "summary": "2-3 sentence summary of what the role is about in plain language",
-
-  "hard_skills": [
-    "Finance modeling",
-    "Advanced Excel",
-    "Python",
-    "SQL",
-    "Data analysis",
-    "Audit & tax compliance"
-  ],
-
-  "soft_skills": [
-    "Communication",
-    "Stakeholder management",
-    "Attention to detail",
-    "Problem-solving"
-  ],
-
-  "keywords": [
-    "KRA",
-    "IFRS",
-    "Power BI",
-    "SAP",
-    "CRM"
-  ],
-
-  "nice_to_have": [
-    "CPA(K)",
-    "ACCA",
-    "Experience in telecoms industry"
-  ],
-
-  "red_flags": [
-    "Any potential mismatch risks between a generic graduate profile and this role",
-    "e.g. 'role seems senior compared to limited experience'"
-  ],
-
-  "application_strategy": [
-    "Key points to emphasize in CV",
-    "Key points to emphasize in cover letter",
-    "What to highlight in interviews"
-  ]
+  "role_name": "string - best guess at job title",
+  "company_name": "string - employer name or 'Confidential'",
+  "seniority": "Entry-level | Mid-level | Senior | Internship | Graduate Trainee",
+  "summary": "2-3 sentence plain English summary of the role",
+  "hard_skills": ["Python", "SQL", "Excel", ...],
+  "soft_skills": ["Leadership", "Communication", ...],
+  "keywords": ["Agile", "Stakeholder Management", ...],
+  "inferred_profile": "Early-career Analyst | Mid-level Manager | Senior Engineer | etc."
 }}
 
-Remember: return ONLY valid JSON, no markdown fences or commentary.
-    """.strip()
-
-    generation_config = genai.types.GenerationConfig(
-        temperature=0.4,
-        max_output_tokens=1024,
-    )
+Return only the JSON. No backticks, no explanation.
+"""
 
     response = model.generate_content(
         prompt,
-        generation_config=generation_config,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.3,
+            max_output_tokens=1024,
+        ),
     )
-    raw = getattr(response, "text", "") or ""
 
-    try:
-        data = _safe_json_loads(raw)
-    except Exception as e:
-        raise RuntimeError(f"Failed to parse job analysis JSON: {e}\nRaw response:\n{raw}") from e
+    raw = (response.text or "").strip()
+    if not raw:
+        raise RuntimeError("Gemini returned an empty response for job analysis")
 
-    if not isinstance(data, dict):
-        raise RuntimeError("Job analysis response was not a JSON object.")
-
-    # Normalise some keys to avoid KeyError downstream.
-    data.setdefault("hard_skills", [])
-    data.setdefault("soft_skills", [])
-    data.setdefault("keywords", [])
-    data.setdefault("nice_to_have", [])
-    data.setdefault("red_flags", [])
-    data.setdefault("application_strategy", [])
-
-    return data
+    return _safe_json_loads(raw)
 
 
 # ============================================================
-# Resume Rewriting (Premium Kenyan Style)
+# Resume Rewrite
 # ============================================================
 
-def rewrite_resume(
-    resume_text: str,
-    job_analysis: Dict[str, Any],
-) -> str:
+def rewrite_resume(resume_text: str, job_analysis: Dict[str, Any]) -> str:
     """
-    Rewrite the user's resume into a premium, ATS-optimized document.
-
-    The output is Markdown so we can:
-    - Render in Streamlit nicely
-    - Convert to DOCX/PDF later
+    Rewrite the user's resume as ATS-friendly Markdown tailored to the job.
     """
-    if not resume_text or not resume_text.strip():
-        raise ValueError("Resume text is empty.")
-
-    profile_hint = job_analysis.get(
-        "inferred_profile",
-        "Early-career Business / Operations / Analyst",
-    )
-
     model = _get_gemini_model()
 
+    role = job_analysis.get("role_name", "this role")
+
     prompt = f"""
-You are an expert Kenyan resume writer trained on CVs from Safaricom, KCB,
-Deloitte, Microsoft ADC, Twiga, banks, and UN agencies.
+You are Kenya's top resume writer for candidates applying to {role} roles.
 
-Rewrite the user's resume into a PREMIUM, ATS-optimized CV tailored to
-the job analysis below.
+Using the user's raw resume and the job analysis below, rewrite their resume in clean, ATS-friendly Markdown.
 
-PROFILE HINT (approximate target profile):
-{profile_hint}
-
-JOB ANALYSIS (JSON):
+JOB ANALYSIS:
 {json.dumps(job_analysis, indent=2)}
 
-USER RESUME (RAW TEXT):
+USER RESUME (raw text):
 \"\"\"{resume_text}\"\"\"
 
 
-GOALS:
-- Make the candidate look like a strong fit for the role above.
-- Use Kenyan corporate language and realistic, high-impact achievements.
-- Add metrics where sensible (KES amounts, %, time saved, accuracy improved, team size, etc.).
-- If dates are missing, use neutral phrasing like "(Dates Not Provided)".
-- Assume early-career professional unless job_analysis.seniority clearly indicates senior.
+RULES:
+- Use Kenyan corporate language and realistic achievements.
+- Add metrics where possible (e.g., "Increased sales by 43%", "Managed team of 12").
+- If dates are missing, write "(Dates Not Provided)".
+- Assume early-career unless seniority says otherwise.
 
-OUTPUT FORMAT (MARKDOWN, NO JSON):
-Exactly follow this structure and headings:
+OUTPUT FORMAT (Markdown only, no JSON):
 
 ## SUMMARY
-- 3–5 sentences summarising experience, domain, and value to Kenyan employers.
+3–5 sentences about experience and value.
 
 ## EXPERIENCE
-For each role (inferred or explicit):
-**Job Title** | Company | Location | Dates (or "Dates Not Provided")
-- Bullet 1 (Action → Task → Result → Metric)
-- Bullet 2
-- Bullet 3
-(4–6 bullets per role is ideal)
+**Job Title** | Company | Location | Dates
+- Action → Result → Metric
+- ...
 
 ## EDUCATION
-- Degree | Institution | Location | Year (if known)
+- Degree | Institution | Year
 
 ## KEY SKILLS
-- Grouped bullets like:
-- Technical: ...
-- Business/Finance/Domain: ...
-- Tools: ...
+- Technical: Python, SQL, Power BI
+- Business: Financial Modeling, Strategy
+- Tools: Excel, Tableau
 
 ## CORE COMPETENCIES
-- 6–10 bullet points of competencies aligned to the analyzed role.
+- Stakeholder Management
+- Data-Driven Decision Making
+- ...
 
-Keep it ATS-friendly:
-- No tables, emojis, icons, or images.
-- Use plain text and simple Markdown only.
-    """.strip()
-
-    generation_config = genai.types.GenerationConfig(
-        temperature=0.5,
-        max_output_tokens=2048,
-    )
+Use only simple Markdown. No tables, no emojis, no images.
+"""
 
     response = model.generate_content(
         prompt,
-        generation_config=generation_config,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.5,
+            max_output_tokens=2048,
+        ),
     )
-    text = getattr(response, "text", "") or ""
-    return text.strip()
+
+    text = (response.text or "").strip()
+    if not text:
+        raise RuntimeError("Gemini returned an empty response for resume rewrite")
+
+    return text
 
 
 # ============================================================
-# Cover Letter Generation
+# Cover Letter & Emails
 # ============================================================
 
-def generate_cover_letter(
-    resume_text: str,
-    job_analysis: Dict[str, Any],
-) -> str:
+def generate_cover_letter(resume_text: str, job_analysis: Dict[str, Any]) -> str:
     """
-    Generate a tailored cover letter in plain text (Markdown allowed).
+    Generate a tailored cover letter (plain text / Markdown).
     """
     model = _get_gemini_model()
-
-    role_name = job_analysis.get("role_name", "this position")
-    company_name = job_analysis.get("company_name", "your organization")
-    profile_hint = job_analysis.get(
-        "inferred_profile",
-        "Early-career Business / Operations / Analyst",
-    )
+    role = job_analysis.get("role_name", "this position")
+    company = job_analysis.get("company_name", "your esteemed organization")
 
     prompt = f"""
-You are an expert Kenyan cover letter writer.
+Write a professional, warm Kenyan cover letter (4–6 short paragraphs) for the role below.
 
-Using the user's resume and the job analysis below, write a strong,
-one-page cover letter tailored to the Kenyan job market.
+Role: {role}
+Company: {company}
+Analysis: {json.dumps(job_analysis)}
 
-JOB ANALYSIS JSON:
-{json.dumps(job_analysis, indent=2)}
-
-ASSUMED TARGET ROLE:
-Role: {role_name}
-Company: {company_name}
-Profile: {profile_hint}
-
-USER RESUME (RAW TEXT):
+Candidate resume:
 \"\"\"{resume_text}\"\"\"
 
 
-GUIDELINES:
-- 4–6 short paragraphs.
-- Professional but warm tone, not robotic.
-- Show understanding of the specific role and company.
-- Reference 2–3 hard skills and 2–3 soft skills from the analysis.
-- Mention 2–3 achievements with metrics where possible.
-- Close with a confident, polite call to action.
-
-FORMAT:
-Return plain text or Markdown only, no JSON, no bullet list cover letters.
-    """.strip()
-
-    generation_config = genai.types.GenerationConfig(
-        temperature=0.55,
-        max_output_tokens=1024,
-    )
+Tone: Confident but respectful. Reference 2–3 achievements with metrics. End with a strong call to action.
+Return plain text or light Markdown only (no JSON, no code fences).
+"""
 
     response = model.generate_content(
         prompt,
-        generation_config=generation_config,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.55,
+            max_output_tokens=1024,
+        ),
     )
-    text = getattr(response, "text", "") or ""
-    return text.strip()
 
+    text = (response.text or "").strip()
+    if not text:
+        raise RuntimeError("Gemini returned an empty response for cover letter")
 
-# ============================================================
-# Follow-up Email Strategy
-# ============================================================
+    return text
+
 
 def generate_emails(job_analysis: Dict[str, Any]) -> List[Dict[str, str]]:
     """
-    Generate a small sequence (up to 3) of follow-up emails.
+    Generate a 3-email follow-up sequence as a JSON array.
 
-    Each email is represented as:
-    {
-        "label": "After application (Day 3)",
-        "subject": "Following up on my application for ...",
-        "body": "Full email text..."
-    }
+    Returns a list of dicts with keys: label, subject, body.
+    If parsing fails, returns an empty list.
     """
     model = _get_gemini_model()
-
-    role_name = job_analysis.get("role_name", "the position")
-    company_name = job_analysis.get("company_name", "your organization")
+    role = job_analysis.get("role_name", "the position")
+    company = job_analysis.get("company_name", "your organization")
 
     prompt = f"""
-You are an expert Kenyan career coach.
+Create a 3-email follow-up sequence for a candidate who applied to {role} at {company}.
 
-Based on the following job analysis, create a short follow-up email
-sequence for a candidate who has applied to this role:
+Return ONLY a JSON array with objects containing:
+- "label": e.g. "3 days after application"
+- "subject":
+- "body": full polite Kenyan corporate email
 
-JOB ANALYSIS JSON:
-{json.dumps(job_analysis, indent=2)}
-
-ROLE:
-{role_name} at {company_name}
-
-Return ONLY a JSON array of 2–3 objects. Each object must have:
-- "label": short descriptor, e.g. "After application (Day 3)"
-- "subject": email subject line
-- "body": full email body (plain text, polite, Kenyan corporate tone)
-
-Example structure (do NOT include comments):
-
+Example:
 [
   {{
-    "label": "After application (Day 3)",
-    "subject": "Following up on my application for the Data Analyst role",
-    "body": "Dear Hiring Manager, ... Kind regards, ..."
-  }},
-  ...
+    "label": "Day 3 Follow-Up",
+    "subject": "Following up on my application for {role}",
+    "body": "Dear Hiring Manager..."
+  }}
 ]
 
-Return ONLY JSON.
-    """.strip()
-
-    generation_config = genai.types.GenerationConfig(
-        temperature=0.45,
-        max_output_tokens=1024,
-    )
+No extra text. No explanation. JSON only.
+"""
 
     response = model.generate_content(
         prompt,
-        generation_config=generation_config,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.45,
+            max_output_tokens=1024,
+        ),
     )
-    raw = getattr(response, "text", "") or ""
+
+    raw = (response.text or "").strip()
+    if not raw:
+        # In this case, we just return empty rather than crashing the app
+        return []
 
     try:
         data = _safe_json_loads(raw)
-    except Exception as e:
-        raise RuntimeError(f"Failed to parse follow-up emails JSON: {e}\nRaw response:\n{raw}") from e
+        if not isinstance(data, list):
+            return []
 
-    if not isinstance(data, list):
-        raise RuntimeError("Expected a JSON array of email objects from the model.")
-
-    emails: List[Dict[str, str]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        subject = item.get("subject", "").strip()
-        body = item.get("body", "").strip()
-        label = item.get("label", "").strip() or "Email"
-        if subject and body:
-            emails.append(
+        normalized: list[dict[str, str]] = []
+        for item in data[:3]:
+            if not isinstance(item, dict):
+                continue
+            subject = (item.get("subject") or "").strip()
+            body = (item.get("body") or "").strip()
+            if not subject or not body:
+                continue
+            normalized.append(
                 {
-                    "label": label,
+                    "label": (item.get("label") or "Email").strip(),
                     "subject": subject,
                     "body": body,
                 }
             )
-
-    return emails[:3]
+        return normalized
+    except Exception:
+        # If parsing fails, don't crash the app – just return no emails.
+        return []
