@@ -35,7 +35,7 @@ from webhook_server import run as run_webhook_server
 init_db()
 
 
-@st.singleton
+@st.cache_resource(show_spinner=False)
 def _start_webhook_server_once() -> bool:
     """
     Start the FastAPI webhook server exactly once per process
@@ -62,39 +62,41 @@ def get_or_create_user_id() -> str:
     Generate a persistent user_id for this browser.
 
     - Stored in st.session_state["user_id"]
-    - Also persisted in URL query params for persistence between reloads.
-    - We *attempt* to set a cookie via JavaScript. Note: due to Streamlit's
-      architecture we cannot set a true HTTP-only cookie from here. For
-      that, you'd typically terminate Streamlit behind a reverse proxy
-      (e.g. Nginx) that injects the cookie in the HTTP response.
+    - Also persisted in URL query params using st.query_params
+    - Best-effort non-HTTP-only cookie set via JS
     """
+    # If already in session, return it
     if "user_id" in st.session_state and st.session_state["user_id"]:
         return st.session_state["user_id"]
 
-    # Try to get from URL query params first
-    query_params = st.experimental_get_query_params()
-    existing_uid = query_params.get("user_id", [None])[0]
+    # Read from URL query params (new Streamlit API)
+    query_params = st.query_params
+    existing_uid = query_params.get("user_id")
 
     if existing_uid:
         user_id = existing_uid
     else:
+        # Generate new UUID
         user_id = str(uuid.uuid4())
-        # Persist in URL for this browser session
-        query_params["user_id"] = [user_id]
-        st.experimental_set_query_params(**query_params)
+        # Update URL query params
+        st.query_params.update({"user_id": user_id})
 
+    # Persist in session
     st.session_state["user_id"] = user_id
 
-    # Best-effort, non-HTTP-only cookie via JS (cannot set httpOnly from JS).
+    # Best-effort cookie (not httpOnly, but better than nothing)
     st.markdown(
         f"""
         <script>
         (function() {{
-            var cookie = document.cookie || "";
-            if (!cookie.includes("user_id=")) {{
-                var d = new Date();
-                d.setTime(d.getTime() + (365*24*60*60*1000)); // 1 year
-                document.cookie = "user_id={user_id};expires=" + d.toUTCString() + ";path=/;SameSite=Lax";
+            const cookies = document.cookie || "";
+            if (!cookies.includes("user_id=")) {{
+                const expires = new Date();
+                expires.setFullYear(expires.getFullYear() + 1);
+                document.cookie =
+                    "user_id={user_id};expires=" +
+                    expires.toUTCString() +
+                    ";path=/;SameSite=Lax";
             }}
         }})();
         </script>
@@ -126,6 +128,8 @@ def init_state() -> None:
         # Payment-related UI flags (state about *expecting* a webhook / manual check)
         "waiting_for_payment": False,
         "pending_invoice_id": None,
+        # Simple rate limiting: how many full analyses this session has done
+        "analysis_uses": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -289,6 +293,32 @@ def to_pdf(markdown_text: str) -> bytes:
 
 
 # ============================================================
+# Phone validation helper (Kenya)
+# ============================================================
+
+def _is_valid_kenyan_phone(phone: str) -> bool:
+    """
+    Basic Kenyan mobile number validation.
+
+    Accept:
+      - 07XXXXXXXX
+      - 01XXXXXXXX
+      - 2547XXXXXXXX
+      - 2541XXXXXXXX
+      - +2547XXXXXXXX
+      - +2541XXXXXXXX
+    """
+    if not phone:
+        return False
+
+    # strip spaces and hyphens
+    cleaned = re.sub(r"[ \-]", "", phone)
+
+    pattern = r"^(07\d{8}|01\d{8}|2547\d{8}|2541\d{8}|\+2547\d{8}|\+2541\d{8})$"
+    return re.fullmatch(pattern, cleaned) is not None
+
+
+# ============================================================
 # Payment UI Helpers
 # ============================================================
 
@@ -325,28 +355,36 @@ def render_payment_gate(feature_name: str, amount: int, user_id: str) -> None:
         if not phone_input:
             st.error("Please enter your M-Pesa phone number.")
         else:
-            with st.spinner("Sending IntaSend payment request to your phone..."):
-                invoice_id = trigger_mpesa_payment(
-                    phone_number=phone_input,
-                    amount=amount,
-                )
+            cleaned_phone = re.sub(r"[ \-]", "", phone_input)
 
-            if not invoice_id:
-                st.error("Unable to initiate payment via IntaSend. Please try again.")
+            if not _is_valid_kenyan_phone(cleaned_phone):
+                st.error(
+                    "Please enter a valid Kenyan mobile number, e.g. "
+                    "0712345678 or +254712345678."
+                )
             else:
-                create_payment(
-                    user_id=user_id,
-                    phone=phone_input,
-                    invoice_id=invoice_id,
-                    amount=float(amount),
-                )
-                st.session_state["waiting_for_payment"] = True
-                st.session_state["pending_invoice_id"] = invoice_id
+                with st.spinner("Sending IntaSend payment request to your phone..."):
+                    invoice_id = trigger_mpesa_payment(
+                        phone_number=cleaned_phone,
+                        amount=amount,
+                    )
 
-                st.info(
-                    "📲 STK push sent! Complete payment on your phone, then click "
-                    "**'I have paid – Check Status'** below."
-                )
+                if not invoice_id:
+                    st.error("Unable to initiate payment via IntaSend. Please try again.")
+                else:
+                    create_payment(
+                        user_id=user_id,
+                        phone=cleaned_phone,
+                        invoice_id=invoice_id,
+                        amount=float(amount),
+                    )
+                    st.session_state["waiting_for_payment"] = True
+                    st.session_state["pending_invoice_id"] = invoice_id
+
+                    st.info(
+                        "📲 STK push sent! Complete payment on your phone, then click "
+                        "**'I have paid – Check Status'** below."
+                    )
 
     # Manual status check (one-shot, no polling loop)
     invoice_id = st.session_state.get("pending_invoice_id")
@@ -569,7 +607,13 @@ with tab_setup:
         )
 
     if analyze_btn:
-        if not st.session_state.resume_text.strip():
+        # Simple rate limit: 3 free runs per session for non-paid users
+        if not user_is_paid and st.session_state.get("analysis_uses", 0) >= 3:
+            st.error(
+                "You have reached the limit of 3 free analyses. "
+                "Unlock Premium to generate unlimited tailored resumes and cover letters."
+            )
+        elif not st.session_state.resume_text.strip():
             st.error("Please provide your resume details (upload a PDF or enter text manually).")
         elif not st.session_state.job_description.strip():
             st.error("Please paste the full job description.")
@@ -600,6 +644,9 @@ with tab_setup:
                         st.session_state.job_analysis_json,
                     )
                 st.session_state.follow_up_emails = emails
+
+                # Increment analysis uses only on successful full run
+                st.session_state["analysis_uses"] = st.session_state.get("analysis_uses", 0) + 1
 
                 st.success("✅ All done! Check the other tabs for your Application Kit.")
                 st.balloons()
