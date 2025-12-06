@@ -450,8 +450,8 @@ with st.sidebar:
 # Main Tabs
 # ============================================================
 
-tab_setup, tab_resume, tab_cover, tab_emails, tab_admin = st.tabs(
-    ["Setup", "Resume", "Cover Letter", "Email Strategy", "Admin"]
+tab_setup, tab_resume, tab_cover, tab_emails = st.tabs(
+    ["Setup", "Resume", "Cover Letter", "Email Strategy"]
 )
 
 # ------------------------------------------------------------
@@ -590,32 +590,4 @@ with tab_emails:
     else:
         st.info("Your follow-up email sequence will appear here after you run the analysis in the Setup tab.")
 
-# ------------------------------------------------------------
-# TAB 5: Admin – manually mark users as paid
-# ------------------------------------------------------------
-with tab_admin:
-    st.header("Admin Panel (Manual Unlock)")
 
-    expected_admin_pw = st.secrets.get("ADMIN_PASSWORD")
-
-    if not expected_admin_pw:
-        st.warning("ADMIN_PASSWORD is not configured in secrets. Set it before using the admin panel.")
-    else:
-        admin_pw = st.text_input("Admin password", type="password")
-        if admin_pw == expected_admin_pw:
-            st.success("Admin authenticated.")
-
-            target_user_id = st.text_input("User ID to mark as paid")
-            if st.button("Mark this user as PAID"):
-                if not target_user_id.strip():
-                    st.error("Please enter a user_id.")
-                else:
-                    ok = mark_user_paid(target_user_id.strip())
-                    if ok:
-                        st.success(f"User {target_user_id.strip()} marked as paid.")
-                    else:
-                        st.error("Failed to mark user as paid (see logs).")
-        else:
-            if admin_pw:
-                st.error("Incorrect admin password.")
-            st.info("Enter the admin password to manage paid users.")
