@@ -1,6 +1,6 @@
 """
 Secure, thread-safe SQLite payment database for AI Career Accelerator.
-Used by both Streamlit (app.py) and FastAPI webhook (webhook_server.py).
+Used by Streamlit app to store who has paid (manually marked via admin panel).
 """
 
 import os
@@ -11,39 +11,23 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-# ----------------------------------------------------------------------
-# Logging
-# ----------------------------------------------------------------------
-
 logger = logging.getLogger(__name__)
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
-# ----------------------------------------------------------------------
-# Database location — works locally and on Streamlit Cloud / Railway / Render
-# ----------------------------------------------------------------------
-
 DB_PATH = Path(os.getenv("PAYMENTS_DB_PATH", Path(__file__).with_name("payments.db")))
 
-# Thread lock to prevent SQLite "database is locked" errors under concurrent access
 _db_lock = threading.Lock()
 
 
 @contextmanager
 def get_connection():
-    """
-    Thread-safe connection context manager.
-
-    - Uses WAL mode for better concurrency (critical when webhook + Streamlit hit DB).
-    - check_same_thread=False so we can share the DB across threads (webhook + app).
-    - isolation_level=None → autocommit mode (each statement is its own transaction).
-    """
     with _db_lock:
         conn = sqlite3.connect(
             str(DB_PATH),
             timeout=30.0,
             check_same_thread=False,
-            isolation_level=None,  # autocommit; commit/rollback are mostly no-ops
+            isolation_level=None,
         )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
@@ -60,33 +44,25 @@ def get_connection():
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
-    """
-    Migrate older versions of the `payments` table to include new columns if missing.
-    This lets us evolve the schema without dropping data.
-    """
     cursor = conn.execute("PRAGMA table_info(payments)")
     cols = {row["name"] for row in cursor.fetchall()}
 
-    # Add created_at if missing
     if "created_at" not in cols:
         logger.info("[payments_db] Adding missing 'created_at' column")
         conn.execute(
             "ALTER TABLE payments ADD COLUMN created_at TEXT DEFAULT (datetime('now'))"
         )
 
-    # Add updated_at if missing
     if "updated_at" not in cols:
         logger.info("[payments_db] Adding missing 'updated_at' column")
         conn.execute(
             "ALTER TABLE payments ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))"
         )
 
-    # Add paid_at if missing
     if "paid_at" not in cols:
         logger.info("[payments_db] Adding missing 'paid_at' column")
         conn.execute("ALTER TABLE payments ADD COLUMN paid_at TEXT")
 
-    # Add is_paid if missing
     if "is_paid" not in cols:
         logger.info("[payments_db] Adding missing 'is_paid' column")
         conn.execute(
@@ -95,9 +71,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
-    """Create table + performance indexes if they don't exist, and migrate older schemas."""
     with get_connection() as conn:
-        # Ensure table exists (if it's a fresh DB, this will create full schema)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS payments (
@@ -114,10 +88,8 @@ def init_db() -> None:
             """
         )
 
-        # If the table existed already with an older schema, patch in missing columns
         _ensure_columns(conn)
 
-        # Critical indexes for fast lookups; wrap in try/except to be safe with older DBs
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON payments(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)")
         conn.execute(
@@ -129,17 +101,12 @@ def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_created_at ON payments(created_at)"
             )
         except sqlite3.OperationalError as e:
-            # In case some really old DB is still weird; log and continue
             logger.warning(f"[payments_db] Could not create idx_created_at index: {e}")
 
         logger.info(f"[payments_db] Initialized/migrated DB at {DB_PATH}")
 
 
 def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> bool:
-    """
-    Insert payment record (idempotent).
-    Returns True if a new row was inserted, False otherwise.
-    """
     if not all([user_id, phone, invoice_id, amount]):
         return False
 
@@ -160,7 +127,6 @@ def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> 
                 )
             return inserted
     except sqlite3.IntegrityError:
-        # Duplicate invoice_id — expected and safe (INSERT OR IGNORE handles it)
         logger.warning(
             f"[payments_db] Duplicate invoice_id (ignored): invoice_id={invoice_id}"
         )
@@ -171,10 +137,6 @@ def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> 
 
 
 def mark_invoice_paid(invoice_id: str) -> bool:
-    """
-    Atomically mark invoice as paid.
-    Returns True only if a row was actually updated (prevents double-marking).
-    """
     if not invoice_id:
         return False
 
@@ -210,9 +172,6 @@ def mark_invoice_paid(invoice_id: str) -> bool:
 
 
 def is_user_paid(user_id: str) -> bool:
-    """
-    Fast check: does this user have at least one confirmed payment?
-    """
     if not user_id:
         return False
 
@@ -226,27 +185,75 @@ def is_user_paid(user_id: str) -> bool:
                 """,
                 (user_id,),
             )
-            paid = cursor.fetchone() is not None
-            return paid
+            return cursor.fetchone() is not None
     except Exception as e:
         logger.error(f"[payments_db] is_user_paid error: {e}")
         return False
 
 
+def mark_user_paid(user_id: str) -> bool:
+    """
+    Manually mark a user as paid (for WhatsApp/manual payments).
+
+    If the user already has payment rows, we mark them paid.
+    If they don't, we insert a synthetic row so is_user_paid() becomes True.
+    """
+    if not user_id:
+        return False
+
+    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    try:
+        with get_connection() as conn:
+            # Try to update existing unpaid rows first
+            cursor = conn.execute(
+                """
+                UPDATE payments
+                SET is_paid = 1,
+                    paid_at = ?,
+                    updated_at = datetime('now')
+                WHERE user_id = ? AND is_paid = 0
+                """,
+                (now, user_id),
+            )
+            updated = cursor.rowcount > 0
+
+            if not updated:
+                # No existing rows → create a manual "whatsapp" payment
+                invoice_id = f"manual-whatsapp-{user_id}-{int(datetime.utcnow().timestamp())}"
+                amount = 1000.0  # your current price
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO payments (
+                        user_id, phone, invoice_id, amount, is_paid, paid_at, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, 1, ?, datetime('now'), datetime('now'))
+                    """,
+                    (user_id, "WHATSAPP", invoice_id, amount, now),
+                )
+                logger.info(
+                    f"[payments_db] Manually marked user as paid via WhatsApp: "
+                    f"user_id={user_id}, invoice_id={invoice_id}"
+                )
+            else:
+                logger.info(
+                    f"[payments_db] Updated existing rows as paid for user_id={user_id}"
+                )
+
+            return True
+    except Exception as e:
+        logger.error(f"[payments_db] mark_user_paid error: {e}")
+        return False
+
+
 def get_user_payments(user_id: str):
-    """
-    Debug/admin function — list all payments for a user.
-    Returns a list of dicts.
-    """
     with get_connection() as conn:
         cursor = conn.execute(
             "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,),
         )
-        rows = [dict(row) for row in cursor.fetchall()]
-        return rows
+        return [dict(row) for row in cursor.fetchall()]
 
 
-# Auto-init on import so both app.py and webhook_server.py
-# can safely assume the table exists.
+# Auto-init
 init_db()
