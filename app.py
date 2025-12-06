@@ -400,7 +400,7 @@ with tab_resume:
         title="ATS-Optimized Resume",
         markdown_content=st.session_state.final_resume_text,
         filename_base="tailored_resume",
-        amount=1500,
+        amount=1000,   # CHANGED from 1500 → 1000
         user_is_paid=user_is_paid,
         user_id=user_id,
     )
@@ -410,7 +410,7 @@ with tab_cover:
         title="Custom Cover Letter",
         markdown_content=st.session_state.cover_letter_text,
         filename_base="cover_letter",
-        amount=1500,
+        amount=1000,   # CHANGED from 1500 → 1000
         user_is_paid=user_is_paid,
         user_id=user_id,
     )
