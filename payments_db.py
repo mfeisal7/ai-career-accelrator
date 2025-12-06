@@ -15,13 +15,20 @@ logger = logging.getLogger(__name__)
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
+# Resolve database path (can be overridden via PAYMENTS_DB_PATH)
 DB_PATH = Path(os.getenv("PAYMENTS_DB_PATH", Path(__file__).with_name("payments.db")))
+
+# Ensure parent directory exists (important for paths like /data/payments.db on Railway)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 _db_lock = threading.Lock()
 
 
 @contextmanager
 def get_connection():
+    """
+    Thread-safe connection context manager with WAL mode and sane timeouts.
+    """
     with _db_lock:
         conn = sqlite3.connect(
             str(DB_PATH),
@@ -44,6 +51,9 @@ def get_connection():
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """
+    Add any missing columns to the payments table for backwards compatibility.
+    """
     cursor = conn.execute("PRAGMA table_info(payments)")
     cols = {row["name"] for row in cursor.fetchall()}
 
@@ -71,6 +81,10 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
+    """
+    Create the payments table and indexes if they don't exist yet,
+    and run lightweight migrations to ensure schema compatibility.
+    """
     with get_connection() as conn:
         conn.execute(
             """
@@ -91,7 +105,9 @@ def init_db() -> None:
         _ensure_columns(conn)
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON payments(user_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_paid "
             "ON payments(user_id, is_paid) WHERE is_paid = 1"
@@ -107,6 +123,11 @@ def init_db() -> None:
 
 
 def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> bool:
+    """
+    Create a pending payment record for a user.
+
+    Returns True if a new row was inserted, False otherwise.
+    """
     if not all([user_id, phone, invoice_id, amount]):
         return False
 
@@ -137,6 +158,11 @@ def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> 
 
 
 def mark_invoice_paid(invoice_id: str) -> bool:
+    """
+    Mark a specific invoice as paid (typically from webhooks).
+
+    Returns True if at least one row was updated.
+    """
     if not invoice_id:
         return False
 
@@ -162,7 +188,7 @@ def mark_invoice_paid(invoice_id: str) -> bool:
                 )
             else:
                 logger.info(
-                    f"[payments_db] mark_invoice_paid: no rows updated "
+                    "[payments_db] mark_invoice_paid: no rows updated "
                     f"(already paid or unknown invoice_id={invoice_id})"
                 )
             return updated
@@ -172,6 +198,9 @@ def mark_invoice_paid(invoice_id: str) -> bool:
 
 
 def is_user_paid(user_id: str) -> bool:
+    """
+    Return True if the given user has at least one paid payment row.
+    """
     if not user_id:
         return False
 
@@ -220,8 +249,10 @@ def mark_user_paid(user_id: str) -> bool:
 
             if not updated:
                 # No existing rows → create a manual "whatsapp" payment
-                invoice_id = f"manual-whatsapp-{user_id}-{int(datetime.utcnow().timestamp())}"
-                amount = 1000.0  # your current price
+                invoice_id = (
+                    f"manual-whatsapp-{user_id}-{int(datetime.utcnow().timestamp())}"
+                )
+                amount = 1000.0  # current price
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO payments (
@@ -232,7 +263,7 @@ def mark_user_paid(user_id: str) -> bool:
                     (user_id, "WHATSAPP", invoice_id, amount, now),
                 )
                 logger.info(
-                    f"[payments_db] Manually marked user as paid via WhatsApp: "
+                    "[payments_db] Manually marked user as paid via WhatsApp: "
                     f"user_id={user_id}, invoice_id={invoice_id}"
                 )
             else:
@@ -247,6 +278,9 @@ def mark_user_paid(user_id: str) -> bool:
 
 
 def get_user_payments(user_id: str):
+    """
+    Return a list of all payment records for a user, newest first.
+    """
     with get_connection() as conn:
         cursor = conn.execute(
             "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
@@ -255,5 +289,5 @@ def get_user_payments(user_id: str):
         return [dict(row) for row in cursor.fetchall()]
 
 
-# Auto-init
+# Auto-init on import
 init_db()
