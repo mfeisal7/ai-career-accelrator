@@ -68,17 +68,28 @@ def _get_gemini_model():
     """
     Configure the Gemini client and return a GenerativeModel instance.
 
-    Retries on transient failures (network, rate limits, etc.)
-    due to the tenacity decorator.
+    We hard-code a model name that works with AI Studio keys.
+    If you want to change it, edit `model_name` below.
     """
     api_key = _get_api_key()
     genai.configure(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    return genai.GenerativeModel(model_name)
+
+    # You can change this if your key supports a different model
+    # Common options: "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-1.0-pro"
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+    try:
+        return genai.GenerativeModel(model_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load Gemini model '{model_name}'. "
+            f"Set GEMINI_MODEL to a valid model or adjust agents._get_gemini_model(). "
+            f"Original error: {e}"
+        )
 
 
 # ============================================================
-# JSON Helpers
+# Response Helpers
 # ============================================================
 
 def _extract_json_block(raw: str) -> str:
@@ -132,6 +143,50 @@ def _safe_json_loads(raw: Optional[str]) -> Any:
         return json.loads(candidate)
 
 
+def _get_response_text(response: Any, label: str) -> str:
+    """
+    Safely extract text from a google-generativeai response.
+
+    Avoids using response.text directly, which raises:
+    'Invalid operation: The response.text quick accessor requires the response
+    to contain a valid Part, but none were returned.'
+    """
+    # Prefer candidates → content.parts → text
+    candidates = getattr(response, "candidates", None)
+    if candidates:
+        for cand in candidates:
+            content = getattr(cand, "content", None)
+            parts = getattr(content, "parts", None) if content is not None else None
+            if parts:
+                texts: List[str] = []
+                for p in parts:
+                    # Newer SDK: Part objects with .text
+                    if hasattr(p, "text") and p.text:
+                        texts.append(p.text)
+                    # Just in case it's dict-like
+                    elif isinstance(p, dict) and p.get("text"):
+                        texts.append(str(p["text"]))
+                if texts:
+                    return "\n".join(texts).strip()
+
+        # No parts with text; inspect finish_reason for better error
+        first = candidates[0]
+        finish_reason = getattr(first, "finish_reason", None)
+        raise RuntimeError(
+            f"Gemini returned no text for {label} (finish_reason={finish_reason}). "
+            "Try again with a more detailed input or slightly different wording."
+        )
+
+    # Fallback: some responses still expose .text directly
+    txt = getattr(response, "text", None)
+    if txt:
+        return str(txt).strip()
+
+    raise RuntimeError(
+        f"Gemini returned an empty response object for {label} (no candidates, no text)."
+    )
+
+
 # ============================================================
 # PDF Extraction
 # ============================================================
@@ -177,7 +232,6 @@ Analyze the following job description and return ONLY a valid JSON object with n
 JOB DESCRIPTION:
 \"\"\"{job_description}\"\"\"
 
-
 Return JSON with exactly these keys:
 
 {{
@@ -202,10 +256,7 @@ Return only the JSON. No backticks, no explanation.
         ),
     )
 
-    raw = (response.text or "").strip()
-    if not raw:
-        raise RuntimeError("Gemini returned an empty response for job analysis")
-
+    raw = _get_response_text(response, "job analysis")
     return _safe_json_loads(raw)
 
 
@@ -273,10 +324,9 @@ Use only simple Markdown. No tables, no emojis, no images.
         ),
     )
 
-    text = (response.text or "").strip()
+    text = _get_response_text(response, "resume rewrite")
     if not text:
         raise RuntimeError("Gemini returned an empty response for resume rewrite")
-
     return text
 
 
@@ -315,10 +365,9 @@ Return plain text or light Markdown only (no JSON, no code fences).
         ),
     )
 
-    text = (response.text or "").strip()
+    text = _get_response_text(response, "cover letter")
     if not text:
         raise RuntimeError("Gemini returned an empty response for cover letter")
-
     return text
 
 
@@ -361,9 +410,8 @@ No extra text. No explanation. JSON only.
         ),
     )
 
-    raw = (response.text or "").strip()
+    raw = _get_response_text(response, "follow-up emails")
     if not raw:
-        # In this case, we just return empty rather than crashing the app
         return []
 
     try:
