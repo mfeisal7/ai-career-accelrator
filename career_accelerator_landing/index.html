@@ -83,6 +83,11 @@
       background: rgba(15, 23, 42, 0.9);
       backdrop-filter: blur(12px);
     }
+    /* Simple modal backdrop blur */
+    .modal-backdrop {
+      background: rgba(15,23,42,0.85);
+      backdrop-filter: blur(8px);
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100">
@@ -121,13 +126,45 @@
         <a href="#faq" class="hover:text-emerald-400">FAQ</a>
       </nav>
 
-      <button
-        class="hidden md:inline-flex items-center gap-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-semibold text-xs px-4 py-2"
-        onclick="window.location.href='https://ai-career-accelrator-e99t3gzq8om9g84zzes4ik.streamlit.app/'"
-      >
-        <span>Enter App</span>
-        <i class="fa-solid fa-arrow-right text-xs"></i>
-      </button>
+      <!-- Auth + App Buttons -->
+      <div class="flex items-center gap-2">
+        <!-- Logged-in user pill (hidden until login) -->
+        <div
+          id="user-pill"
+          class="hidden md:flex items-center gap-2 rounded-full bg-slate-800 border border-slate-700 px-3 py-1 text-[0.7rem] text-slate-200"
+        >
+          <i class="fa-solid fa-user text-emerald-400"></i>
+          <span id="user-email-label">student@example.com</span>
+          <button
+            class="text-[0.65rem] text-slate-400 hover:text-emerald-400"
+            onclick="logoutUser()"
+            type="button"
+          >
+            Logout
+          </button>
+        </div>
+
+        <!-- Login button (hidden after login) -->
+        <button
+          id="login-btn"
+          class="hidden md:inline-flex items-center gap-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs px-3 py-2 border border-slate-700"
+          type="button"
+          onclick="openAuthModal('login')"
+        >
+          <i class="fa-solid fa-right-to-bracket text-xs"></i>
+          <span>Login</span>
+        </button>
+
+        <!-- Enter App button (always visible) -->
+        <button
+          class="hidden md:inline-flex items-center gap-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-semibold text-xs px-4 py-2"
+          onclick="window.location.href='https://app.aicareer.co.ke/'"
+          type="button"
+        >
+          <span>Enter App</span>
+          <i class="fa-solid fa-arrow-right text-xs"></i>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -167,7 +204,8 @@
         <div class="flex flex-col gap-3 mb-6">
           <button
             class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold text-sm px-5 py-3 shadow-lg shadow-emerald-500/30"
-            onclick="window.location.href='https://ai-career-accelrator-e99t3gzq8om9g84zzes4ik.streamlit.app/'"
+            onclick="window.location.href='https://app.aicareer.co.ke/'"
+            type="button"
           >
             <i class="fa-solid fa-rocket text-base"></i>
             <span>Enter App – Generate My AI Job Kit</span>
@@ -176,6 +214,7 @@
           <button
             class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs px-4 py-2 border border-slate-700"
             onclick="window.location.href='https://wa.me/254722285538?text=Hi!%20I%20want%20to%20learn%20more%20about%20AI%20Career%20Accelerator.'"
+            type="button"
           >
             <i class="fa-brands fa-whatsapp text-lg text-emerald-400"></i>
             <span>Talk to a Coach on WhatsApp</span>
@@ -348,8 +387,8 @@
         </p>
         <p class="text-sm md:text-base text-slate-300 mb-3">
           Kenyan HR teams are using ATS software, AI filters, and LinkedIn algorithms. A
-          “normal” CV with a generic cover letter simply doesn’t stand out any more —
-          especially for <strong>remote, data, and tech roles</strong>.
+          “normal” CV with a generic cover letter simply doesn’t stand out any more — especially
+          for <strong>remote, data, and tech roles</strong>.
         </p>
         <p class="text-sm md:text-base text-slate-300">
           AI Career Accelerator helps you <strong>play on the same level</strong>: you use AI to
@@ -463,7 +502,8 @@
 
           <button
             class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold text-sm py-3 mb-2 shadow-md shadow-emerald-500/30"
-            onclick="window.location.href='https://ai-career-accelrator-e99t3gzq8om9g84zzes4ik.streamlit.app/'"
+            onclick="window.location.href='https://app.aicareer.co.ke/'"
+            type="button"
           >
             <i class="fa-solid fa-arrow-right text-sm"></i>
             <span>Enter App &amp; Start My Career Accelerator</span>
@@ -480,7 +520,7 @@
   <!-- FAQ -->
   <section id="faq" class="bg-slate-900 py-12 md:py-16 border-t border-slate-800">
     <div class="max-w-5xl mx-auto px-4">
-      <h2 class="text-center text-2xl md:text-3xl font-extrabold text-emerald-400 mb-6">
+      <h2 class="text-center text-2xl md:3xl font-extrabold text-emerald-400 mb-6">
         Frequently Asked Questions
       </h2>
 
@@ -552,7 +592,102 @@
     <i class="fa-brands fa-whatsapp text-2xl text-slate-950"></i>
   </a>
 
-  <!-- Countdown & Small Scripts -->
+  <!-- AUTH MODAL (Login / Sign Up) -->
+  <div
+    id="auth-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+    aria-hidden="true"
+  >
+    <div class="max-w-md w-full mx-4 bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl relative">
+      <button
+        type="button"
+        class="absolute top-3 right-3 text-slate-500 hover:text-emerald-400 text-sm"
+        onclick="closeAuthModal()"
+      >
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="px-6 pt-5 pb-1">
+        <p id="auth-mode-label" class="text-xs font-semibold text-emerald-300 uppercase mb-1">
+          Login
+        </p>
+        <h3 id="auth-title" class="text-lg font-extrabold text-slate-50 mb-1">
+          Welcome back
+        </h3>
+        <p id="auth-subtitle" class="text-[0.8rem] text-slate-400 mb-4">
+          Enter your details to access your AI Career Accelerator dashboard.
+        </p>
+
+        <form id="auth-form" class="space-y-3" onsubmit="handleAuthSubmit(event)">
+          <div class="flex flex-col gap-1">
+            <label for="auth-email" class="text-xs text-slate-300">Email</label>
+            <input
+              id="auth-email"
+              type="email"
+              required
+              class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              placeholder="you@example.com"
+            />
+          </div>
+
+          <div class="flex flex-col gap-1">
+            <label for="auth-password" class="text-xs text-slate-300">Password</label>
+            <input
+              id="auth-password"
+              type="password"
+              required
+              minlength="6"
+              class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <div class="flex items-center justify-between text-[0.75rem] text-slate-400">
+            <label class="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                id="auth-remember"
+                type="checkbox"
+                class="h-3 w-3 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-0"
+              />
+              <span>Remember me on this device</span>
+            </label>
+            <button
+              type="button"
+              class="text-emerald-300 hover:text-emerald-200"
+              onclick="alert('Password reset flow would go here – connect to your backend.')"
+            >
+              Forgot password?
+            </button>
+          </div>
+
+          <div id="auth-error" class="hidden text-[0.75rem] text-red-400 mt-1"></div>
+
+          <button
+            id="auth-submit-btn"
+            type="submit"
+            class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold text-sm py-2.5 mt-1"
+          >
+            <span id="auth-submit-label">Login</span>
+            <i class="fa-solid fa-arrow-right text-xs"></i>
+          </button>
+        </form>
+
+        <div class="mt-4 mb-4 text-[0.75rem] text-slate-400 text-center">
+          <span id="auth-switch-text">Don’t have an account?</span>
+          <button
+            id="auth-switch-btn"
+            type="button"
+            class="text-emerald-300 font-semibold ml-1 hover:text-emerald-200"
+            onclick="toggleAuthMode()"
+          >
+            Sign up
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Countdown & Auth Scripts -->
   <script>
     const countdownEl = document.getElementById('countdown');
     // 31 Jan 2026 23:59:59 EAT = 20:59:59 UTC
@@ -587,6 +722,165 @@
       const extra = Math.floor(Math.random() * 11); // 0-10
       dailyCounterEl.textContent = base + extra;
     }
+
+    // -------------------------
+    // Simple front-end "auth"
+    // -------------------------
+    let currentAuthMode = 'login'; // or 'signup'
+
+    const authModal = document.getElementById('auth-modal');
+    const authModeLabel = document.getElementById('auth-mode-label');
+    const authTitle = document.getElementById('auth-title');
+    const authSubtitle = document.getElementById('auth-subtitle');
+    const authSubmitLabel = document.getElementById('auth-submit-label');
+    const authSwitchText = document.getElementById('auth-switch-text');
+    const authSwitchBtn = document.getElementById('auth-switch-btn');
+    const authError = document.getElementById('auth-error');
+
+    const loginBtn = document.getElementById('login-btn');
+    const userPill = document.getElementById('user-pill');
+    const userEmailLabel = document.getElementById('user-email-label');
+
+    function openAuthModal(mode) {
+      currentAuthMode = mode || 'login';
+      updateAuthModalTexts();
+      authError.classList.add('hidden');
+      authError.textContent = '';
+      authModal.classList.remove('hidden');
+    }
+
+    function closeAuthModal() {
+      authModal.classList.add('hidden');
+    }
+
+    function toggleAuthMode() {
+      currentAuthMode = currentAuthMode === 'login' ? 'signup' : 'login';
+      updateAuthModalTexts();
+      authError.classList.add('hidden');
+      authError.textContent = '';
+    }
+
+    function updateAuthModalTexts() {
+      if (currentAuthMode === 'login') {
+        authModeLabel.textContent = 'Login';
+        authTitle.textContent = 'Welcome back';
+        authSubtitle.textContent = 'Enter your details to access your AI Career Accelerator dashboard.';
+        authSubmitLabel.textContent = 'Login';
+        authSwitchText.textContent = 'Don’t have an account?';
+        authSwitchBtn.textContent = 'Sign up';
+      } else {
+        authModeLabel.textContent = 'Sign up';
+        authTitle.textContent = 'Create your account';
+        authSubtitle.textContent = 'Register to save your progress and access your AI job kit from any device.';
+        authSubmitLabel.textContent = 'Create account';
+        authSwitchText.textContent = 'Already have an account?';
+        authSwitchBtn.textContent = 'Login';
+      }
+    }
+
+    function handleAuthSubmit(event) {
+      event.preventDefault();
+      authError.classList.add('hidden');
+      authError.textContent = '';
+
+      const emailInput = document.getElementById('auth-email');
+      const passInput = document.getElementById('auth-password');
+      const rememberInput = document.getElementById('auth-remember');
+
+      const email = (emailInput.value || '').trim();
+      const password = passInput.value || '';
+
+      if (!email || !password) {
+        authError.textContent = 'Please fill in all fields.';
+        authError.classList.remove('hidden');
+        return;
+      }
+
+      // TODO: Replace this with real backend calls:
+      //  - /api/login  (POST)
+      //  - /api/signup (POST)
+      // For now we simulate success and store a "session" in localStorage.
+      if (currentAuthMode === 'login') {
+        fakeLogin(email, password, rememberInput.checked);
+      } else {
+        fakeSignup(email, password, rememberInput.checked);
+      }
+    }
+
+    function fakeLogin(email, _password, remember) {
+      // Simulate API success
+      // In real code, you'd verify credentials with your backend here.
+      if (!email.includes('@')) {
+        authError.textContent = 'Please enter a valid email address.';
+        authError.classList.remove('hidden');
+        return;
+      }
+      // Simple "session"
+      if (remember && window.localStorage) {
+        localStorage.setItem('accel_user', JSON.stringify({ email }));
+      } else {
+        // For non-remember case we only keep in memory; here we just don't store.
+      }
+
+      setLoggedInUser(email);
+      closeAuthModal();
+    }
+
+    function fakeSignup(email, _password, remember) {
+      // In real code, you’d send to /api/signup and handle errors.
+      if (!email.includes('@')) {
+        authError.textContent = 'Please enter a valid email address.';
+        authError.classList.remove('hidden');
+        return;
+      }
+
+      if (remember && window.localStorage) {
+        localStorage.setItem('accel_user', JSON.stringify({ email }));
+      }
+
+      setLoggedInUser(email);
+      closeAuthModal();
+    }
+
+    function setLoggedInUser(email) {
+      if (!userPill || !loginBtn) return;
+      userEmailLabel.textContent = email;
+      userPill.classList.remove('hidden');
+      loginBtn.classList.add('hidden');
+    }
+
+    function logoutUser() {
+      if (window.localStorage) {
+        localStorage.removeItem('accel_user');
+      }
+      if (userPill && loginBtn) {
+        userPill.classList.add('hidden');
+        loginBtn.classList.remove('hidden');
+      }
+    }
+
+    // On load, restore "session" from localStorage if present
+    (function initAuthState() {
+      if (window.localStorage) {
+        try {
+          const raw = localStorage.getItem('accel_user');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.email) {
+              setLoggedInUser(parsed.email);
+            } else {
+              if (loginBtn) loginBtn.classList.remove('hidden');
+            }
+          } else {
+            if (loginBtn) loginBtn.classList.remove('hidden');
+          }
+        } catch (e) {
+          if (loginBtn) loginBtn.classList.remove('hidden');
+        }
+      } else {
+        if (loginBtn) loginBtn.classList.remove('hidden');
+      }
+    })();
   </script>
 </body>
 </html>
