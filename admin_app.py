@@ -1,7 +1,6 @@
 # admin_app.py
 """
-Simple admin panel for manually unlocking paid users.
-
+Admin panel for manually unlocking paid users.
 Run with:
     streamlit run admin_app.py
 """
@@ -21,17 +20,17 @@ st.set_page_config(
     layout="centered",
 )
 
-st.title("🔐 Admin Panel – Manual Unlock")
+st.title("🔐 AI Career Accelerator – Admin Panel")
 
-# ------------------------------------------------------------
+# ------------------------------
 # Authentication
-# ------------------------------------------------------------
+# ------------------------------
 expected_admin_pw = st.secrets.get("ADMIN_PASSWORD", os.getenv("ADMIN_PASSWORD"))
 
 if not expected_admin_pw:
     st.error(
-        "ADMIN_PASSWORD is not configured in Streamlit secrets or environment "
-        "variables. Please set it before using the admin panel."
+        "ADMIN_PASSWORD is not configured in secrets or environment variables. "
+        "Set it before using the admin panel."
     )
     st.stop()
 
@@ -52,9 +51,9 @@ if not st.session_state["admin_authenticated"]:
 
 st.success("You are logged in as admin.")
 
-# ------------------------------------------------------------
+# ------------------------------
 # User lookup & manual unlock
-# ------------------------------------------------------------
+# ------------------------------
 st.subheader("Lookup & Unlock User")
 
 user_id_input = st.text_input(
