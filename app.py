@@ -21,6 +21,16 @@ from agents import (
 from payments_db import init_db, is_user_paid, mark_user_paid
 
 # ============================================================
+# Admin panel switch: if IS_ADMIN_PANEL=1, run admin UI instead
+# ============================================================
+
+if os.getenv("IS_ADMIN_PANEL") == "1":
+    from admin_app import run_admin_panel
+
+    run_admin_panel()
+    st.stop()
+
+# ============================================================
 # One-time initialization: DB only
 # ============================================================
 
@@ -589,5 +599,3 @@ with tab_emails:
                 st.code(body)
     else:
         st.info("Your follow-up email sequence will appear here after you run the analysis in the Setup tab.")
-
-
