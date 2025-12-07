@@ -15,6 +15,26 @@ from payments_db import (
 )
 
 
+def _get_admin_password() -> str | None:
+    """
+    Try to load ADMIN_PASSWORD from environment first, then from st.secrets.
+    Never crash if secrets.toml is missing.
+    """
+    env_pw = os.getenv("ADMIN_PASSWORD")
+    if env_pw:
+        return env_pw
+
+    # Only try st.secrets if a secrets file exists
+    try:
+        # st.secrets behaves like a dict, but will raise FileNotFoundError
+        # if no secrets file is configured.
+        return st.secrets["ADMIN_PASSWORD"]
+    except FileNotFoundError:
+        return None
+    except KeyError:
+        return None
+
+
 def run_admin_panel():
     st.set_page_config(
         page_title="AI Career Accelerator – Admin",
@@ -27,11 +47,11 @@ def run_admin_panel():
     # ------------------------------
     # Authentication
     # ------------------------------
-    expected_admin_pw = st.secrets.get("ADMIN_PASSWORD", os.getenv("ADMIN_PASSWORD"))
+    expected_admin_pw = _get_admin_password()
 
     if not expected_admin_pw:
         st.error(
-            "ADMIN_PASSWORD is not configured in secrets or environment variables. "
+            "ADMIN_PASSWORD is not configured in environment variables or Streamlit secrets. "
             "Set it before using the admin panel."
         )
         st.stop()
