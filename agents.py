@@ -36,6 +36,15 @@ def _get_api_key() -> str:
             "Gemini API key not found. "
             "Set 'GEMINI_API_KEY' as an environment variable in your deployment dashboard."
         )
+
+    # TEMP DEBUG: log only the first few characters to confirm which key is being used.
+    # Remove this print once you’ve confirmed Railway is picking the right value.
+    try:
+        print("[Gemini] Using GEMINI_API_KEY prefix:", key[:6])
+    except Exception:
+        # Never allow logging to break the app
+        pass
+
     return key
 
 
@@ -79,7 +88,7 @@ def _extract_json_block(raw: str) -> str:
         return fenced.group(1).strip()
 
     # ``` ... ``` (any language)
-    fenced_any = re.search(r"```(.*?)```", raw, flags=re.DOTALL)
+    fenced_any = re.search(r"```(.*?)```", raw, flags=re.Dotall)
     if fenced_any:
         candidate = fenced_any.group(1).strip()
         if candidate.startswith("{") or candidate.startswith("["):
