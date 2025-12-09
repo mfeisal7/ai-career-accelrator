@@ -22,43 +22,12 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 def _get_api_key() -> str:
     """
-    Resolve the Gemini API key from (in order):
-    1. st.secrets["GEMINI_API_KEY"]
-    2. env var GEMINI_API_KEY
-    3. st.session_state["GEMINI_API_KEY"] (for manual input if you wire it in the UI)
-
-    Raises a RuntimeError with a clear message if not found.
+    FIX: Directly returns the API key to bypass 'No secrets found' errors.
     """
-    key: Optional[str] = None
-
-    # 1) Streamlit secrets
-    try:
-        if "GEMINI_API_KEY" in st.secrets:
-            candidate = st.secrets["GEMINI_API_KEY"]
-            if candidate:
-                key = candidate
-    except Exception:
-        # If secrets not configured, just fall through
-        pass
-
-    # 2) Environment variable
-    if not key:
-        env_key = os.getenv("GEMINI_API_KEY")
-        if env_key:
-            key = env_key
-
-    # 3) Session state (optional, for manual-input UI)
-    if not key:
-        session_key = st.session_state.get("GEMINI_API_KEY")
-        if session_key:
-            key = session_key
-
-    if not key:
-        raise RuntimeError(
-            "Gemini API key is not configured. "
-            "Set GEMINI_API_KEY in Streamlit secrets, environment, "
-            "or st.session_state['GEMINI_API_KEY']."
-        )
+    # ---------------------------------------------------------
+    # TODO: PASTE YOUR NEW, VALID API KEY INSIDE THE QUOTES BELOW
+    # ---------------------------------------------------------
+    key = "PASTE_YOUR_NEW_KEY_HERE"
 
     return key
 
@@ -67,15 +36,12 @@ def _get_api_key() -> str:
 def _get_gemini_model():
     """
     Configure the Gemini client and return a GenerativeModel instance.
-
-    We hard-code a model name that works with AI Studio keys.
-    If you want to change it, edit `model_name` below.
     """
     api_key = _get_api_key()
     genai.configure(api_key=api_key)
 
     # You can change this if your key supports a different model
-    # Common options: "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-1.0-pro"
+    # Common options: "gemini-1.5-flash", "gemini-1.5-pro"
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     try:
@@ -146,10 +112,6 @@ def _safe_json_loads(raw: Optional[str]) -> Any:
 def _get_response_text(response: Any, label: str) -> str:
     """
     Safely extract text from a google-generativeai response.
-
-    Avoids using response.text directly, which raises:
-    'Invalid operation: The response.text quick accessor requires the response
-    to contain a valid Part, but none were returned.'
     """
     # Prefer candidates → content.parts → text
     candidates = getattr(response, "candidates", None)
