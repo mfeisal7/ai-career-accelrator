@@ -22,30 +22,29 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 def _get_api_key() -> str:
     """
-    Resolve the Gemini API key from the environment only.
-
-    This keeps secrets out of the code and avoids relying on
-    Streamlit's secrets.toml (which doesn't exist on Railway).
-
-    Make sure GEMINI_API_KEY is set as an environment variable
-    in your deployment (Railway) and locally via .env if needed.
+    Resolve the Gemini API key.
+    Priority 1: Environment Variable (Railway / Cloud Deployment)
+    Priority 2: Streamlit Secrets (Local Development via .streamlit/secrets.toml)
     """
+    # 1. Try Environment Variable first
     key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "Gemini API key not found. "
-            "Set 'GEMINI_API_KEY' as an environment variable in your deployment dashboard."
-        )
+    if key:
+        return key
 
-    # TEMP DEBUG: log only the first few characters to confirm which key is being used.
-    # Remove this print once you’ve confirmed Railway is picking the right value.
+    # 2. Try Streamlit Secrets
     try:
-        print("[Gemini] Using GEMINI_API_KEY prefix:", key[:6])
-    except Exception:
-        # Never allow logging to break the app
+        # st.secrets behaves like a dictionary
+        key = st.secrets["GEMINI_API_KEY"]
+        if key:
+            return key
+    except (FileNotFoundError, KeyError):
         pass
 
-    return key
+    # 3. If neither found, raise error
+    raise RuntimeError(
+        "Gemini API key not found. "
+        "Set 'GEMINI_API_KEY' in .streamlit/secrets.toml (Local) or as an Environment Variable (Deployment)."
+    )
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -57,7 +56,7 @@ def _get_gemini_model():
     genai.configure(api_key=api_key)
 
     # You can change this if your key supports a different model
-    # Common options: "gemini-1.5-flash", "gemini-1.5-pro"
+    # Common options: "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     try:
@@ -88,7 +87,7 @@ def _extract_json_block(raw: str) -> str:
         return fenced.group(1).strip()
 
     # ``` ... ``` (any language)
-    fenced_any = re.search(r"```(.*?)```", raw, flags=re.Dotall)
+    fenced_any = re.search(r"```(.*?)```", raw, flags=re.DOTALL)
     if fenced_any:
         candidate = fenced_any.group(1).strip()
         if candidate.startswith("{") or candidate.startswith("["):
