@@ -22,13 +22,22 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 def _get_api_key() -> str:
     """
-    FIX: Directly returns the API key to bypass 'No secrets found' errors.
+    Resolve the Gemini API key from the environment only.
+    This keeps secrets out of the code and avoids Streamlit's secrets.toml errors.
     """
-    # ---------------------------------------------------------
-    # TODO: PASTE YOUR NEW, VALID API KEY INSIDE THE QUOTES BELOW
-    # ---------------------------------------------------------
-    key = "PASTE_YOUR_NEW_KEY_HERE"
-
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        # Fallback: check st.secrets just in case, but safe wrap it
+        try:
+            key = st.secrets.get("GEMINI_API_KEY")
+        except FileNotFoundError:
+            pass
+            
+    if not key:
+        raise RuntimeError(
+            "Gemini API key not found. "
+            "Set 'GEMINI_API_KEY' as an environment variable in your deployment dashboard."
+        )
     return key
 
 

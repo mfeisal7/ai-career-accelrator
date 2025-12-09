@@ -94,6 +94,22 @@ def get_cached_payment_status(user_id: str) -> bool:
     return is_user_paid(user_id)
 
 
+def _get_whatsapp_number() -> str:
+    """
+    Get the WhatsApp number from environment first, then (optionally) from st.secrets,
+    and finally fall back to a hardcoded default.
+    This avoids 'No secrets found' when secrets.toml is missing.
+    """
+    env_num = os.getenv("WHATSAPP_NUMBER")
+    if env_num:
+        return env_num
+
+    try:
+        return st.secrets["WHATSAPP_NUMBER"]
+    except (FileNotFoundError, KeyError):
+        return "254722285538"
+
+
 # ============================================================
 # Session State Initialization
 # ============================================================
@@ -306,7 +322,9 @@ def premium_download_section(
             st.write(f"To unlock **all {title.lower()} downloads** (Markdown, Word, PDF) for:")
             st.write(f"**KES {amount:,}**")
 
-            whatsapp_number = st.secrets.get("WHATSAPP_NUMBER", "254722285538")
+            # FIX: Use safe getter for WhatsApp
+            whatsapp_number = _get_whatsapp_number()
+            
             whatsapp_message = (
                 "Hi, I want to unlock AI Career Accelerator downloads. "
                 f"My user_id is: {user_id}"
