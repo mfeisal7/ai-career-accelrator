@@ -23,16 +23,14 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 def _get_api_key() -> str:
     """
     Resolve the Gemini API key from the environment only.
-    This keeps secrets out of the code and avoids Streamlit's secrets.toml errors.
+
+    This keeps secrets out of the code and avoids relying on
+    Streamlit's secrets.toml (which doesn't exist on Railway).
+
+    Make sure GEMINI_API_KEY is set as an environment variable
+    in your deployment (Railway) and locally via .env if needed.
     """
     key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        # Fallback: check st.secrets just in case, but safe wrap it
-        try:
-            key = st.secrets.get("GEMINI_API_KEY")
-        except FileNotFoundError:
-            pass
-            
     if not key:
         raise RuntimeError(
             "Gemini API key not found. "
@@ -203,6 +201,7 @@ Analyze the following job description and return ONLY a valid JSON object with n
 JOB DESCRIPTION:
 \"\"\"{job_description}\"\"\"
 
+
 Return JSON with exactly these keys:
 
 {{
@@ -215,6 +214,7 @@ Return JSON with exactly these keys:
   "keywords": ["Agile", "Stakeholder Management", ...],
   "inferred_profile": "Early-career Analyst | Mid-level Manager | Senior Engineer | etc."
 }}
+
 
 Return only the JSON. No backticks, no explanation.
 """
