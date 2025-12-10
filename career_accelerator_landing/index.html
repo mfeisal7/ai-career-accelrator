@@ -4,38 +4,10 @@
   <!-- Basic Meta -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI Career Accelerator Kenya | Land 3+ Interviews in 30 Days</title>
+  <title>AI Career Accelerator Kenya | Turn your degree into your dream job</title>
   <meta
     name="description"
-    content="AI-powered career coaching for Kenyan professionals. Get a world-class CV, tailored cover letters, and a guided job search system to land 3+ interviews in 30 days."
-  />
-
-  <!-- Canonical -->
-  <link rel="canonical" href="https://aicareer.co.ke/" />
-
-  <!-- Open Graph / Social Sharing -->
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="AI Career Accelerator Kenya" />
-  <meta
-    property="og:description"
-    content="Kenyan career accelerator using AI + expert coaching to help you land 3+ interviews in 30 days."
-  />
-  <meta property="og:url" content="https://aicareer.co.ke/" />
-  <meta
-    property="og:image"
-    content="https://aicareer.co.ke/images/og-aicareer-kenya.jpg"
-  />
-
-  <!-- Twitter -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="AI Career Accelerator Kenya" />
-  <meta
-    name="twitter:description"
-    content="Kenyan career accelerator using AI + expert coaching to help you land 3+ interviews in 30 days."
-  />
-  <meta
-    name="twitter:image"
-    content="https://aicareer.co.ke/images/og-aicareer-kenya.jpg"
+    content="AI Career Accelerator helps Kenyan graduates and professionals turn their degree into their dream job with an AI-powered CV, cover letters and a guided job search system."
   />
 
   <!-- Tailwind -->
@@ -49,7 +21,7 @@
     rel="stylesheet"
   />
 
-  <!-- Font Awesome -->
+  <!-- Icons -->
   <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
@@ -63,67 +35,30 @@
       font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
         "Segoe UI", sans-serif;
     }
-
-    .glass {
-      background: rgba(15, 23, 42, 0.8);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid rgba(148, 163, 184, 0.25);
-    }
-
-    .section-gradient {
-      background: radial-gradient(
-          circle at top,
-          rgba(45, 212, 191, 0.15),
-          transparent 55%
-        ),
-        radial-gradient(
-          circle at bottom,
-          rgba(59, 130, 246, 0.15),
-          transparent 55%
-        );
-    }
-
-    .hero-gradient {
-      background: radial-gradient(
-          circle at top left,
-          rgba(45, 212, 191, 0.18),
-          transparent 60%
-        ),
-        radial-gradient(
-          circle at bottom right,
-          rgba(56, 189, 248, 0.18),
-          transparent 60%
-        );
-    }
-
-    .pill {
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(148, 163, 184, 0.4);
-    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-50 antialiased">
-  <!-- Background overlay -->
-  <div
-    class="fixed inset-0 -z-10 bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900"
-  ></div>
+  <!-- Top trust ribbon -->
+  <div class="w-full bg-emerald-500/10 border-b border-emerald-500/30">
+    <div class="mx-auto flex max-w-6xl items-center justify-center gap-2 px-4 py-2 text-xs text-emerald-100">
+      <i class="fa-solid fa-lock"></i>
+      <span>Secure payments via M-Pesa &amp; IntaSend • One-time fee • Lifetime access</span>
+    </div>
+  </div>
 
   <!-- Header -->
-  <header class="sticky top-0 z-40 border-b border-slate-800/60 bg-slate-950/85 backdrop-blur-xl">
+  <header class="border-b border-slate-800/60 bg-slate-950/85 backdrop-blur-xl">
     <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 md:px-6">
       <div class="flex items-center gap-2">
-        <div
-          class="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-400/10"
-        >
-          <i class="fa-solid fa-bolt text-emerald-400"></i>
+        <div class="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-400/10">
+          <span class="text-lg font-bold text-emerald-400">AI</span>
         </div>
         <div class="leading-tight">
           <div class="text-sm font-semibold tracking-tight text-emerald-400">
             AI Career Accelerator
           </div>
           <div class="text-xs text-slate-400">
-            For Kenyan professionals & graduates
+            Built for Kenyan graduates & professionals
           </div>
         </div>
       </div>
@@ -131,74 +66,71 @@
       <nav class="hidden items-center gap-6 text-xs font-medium text-slate-300 md:flex">
         <a href="#how-it-works" class="hover:text-emerald-300">How it works</a>
         <a href="#results" class="hover:text-emerald-300">Results</a>
-        <a href="#faq" class="hover:text-emerald-300">FAQ</a>
         <a href="#pricing" class="hover:text-emerald-300">Pricing</a>
+        <a href="#faq" class="hover:text-emerald-300">FAQ</a>
       </nav>
 
-      <div class="hidden items-center gap-3 md:flex">
+      <div class="flex items-center gap-3">
         <button
-          onclick="window.location.href='https://app.aicareer.co.ke/'"
-          class="rounded-full border border-slate-700/80 px-4 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400/70 hover:text-emerald-300"
+          class="hidden rounded-full border border-slate-700/80 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400/70 hover:text-emerald-300 md:inline-flex"
+          onclick="window.location.href='https://app.aicareer.co.ke/login'"
         >
-          Enter Web App
+          Login
         </button>
-        <a
-          href="https://wa.me/254722285538?text=Hi%20I%27m%20interested%20in%20AI%20Career%20Accelerator"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300"
+        <button
+          class="hidden rounded-full bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:inline-flex"
+          onclick="window.location.href='https://app.aicareer.co.ke/'"
+        >
+          Enter App
+        </button>
+        <!-- Compact mobile CTA -->
+        <button
+          class="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-3 py-1.5 text-[11px] font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:hidden"
+          onclick="window.location.href='https://wa.me/254722285538?text=Hi%20I%27m%20interested%20in%20AI%20Career%20Accelerator'"
         >
           <i class="fa-brands fa-whatsapp"></i>
-          Book Free Strategy Call
-        </a>
+          Chat on WhatsApp
+        </button>
       </div>
-
-      <!-- Simple mobile CTA -->
-      <button
-        class="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-3 py-1.5 text-[11px] font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:hidden"
-        onclick="window.location.href='https://wa.me/254722285538?text=Hi%20I%27m%20interested%20in%20AI%20Career%20Accelerator'"
-      >
-        <i class="fa-brands fa-whatsapp"></i>
-        Free Call
-      </button>
     </div>
   </header>
 
-  <!-- Main -->
-  <main class="mx-auto max-w-6xl px-4 pb-16 pt-10 md:px-6 md:pt-16">
-    <!-- Hero -->
-    <section class="hero-gradient rounded-3xl border border-slate-800/60 p-5 md:p-8">
-      <div class="flex flex-col gap-8 md:flex-row md:items-center">
-        <!-- Left -->
-        <div class="flex-1 space-y-6">
-          <div
-            class="pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-300"
-          >
-            <span
-              class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/10 text-[12px] text-emerald-400"
-            >
-              <i class="fa-solid fa-star"></i>
+  <!-- Main hero section -->
+  <main class="mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-16">
+    <section
+      class="rounded-3xl border border-slate-800/70 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 px-4 py-6 md:px-8 md:py-10"
+    >
+      <div class="flex flex-col gap-8 md:flex-row">
+        <!-- Left: copy -->
+        <div class="flex-1">
+          <div class="inline-flex items-center gap-2 rounded-full bg-slate-900/80 px-3 py-1 text-[11px] text-emerald-300 border border-emerald-500/40">
+            <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/10">
+              <i class="fa-solid fa-bolt text-[11px]"></i>
             </span>
-            <span>Kenya's AI-powered career accelerator</span>
+            <span>From CV panic → 3 interviews in 45 days</span>
           </div>
 
-          <div class="space-y-3">
-            <h1
-              class="text-balance text-2xl font-extrabold tracking-tight text-slate-50 md:text-4xl lg:text-5xl"
-            >
-              Turn your Kenyan degree into your dream job.
-            </h1>
-            <p class="text-sm text-slate-300 md:text-base">
-              We combine AI + real Kenyan hiring experience to transform your
-              CV, cover letters and job search strategy&mdash;so you land
-              <span class="font-semibold text-emerald-300">3+ interviews</span>
-              at serious companies, not random “exposure” roles.
-            </p>
-          </div>
+          <h1 class="mt-4 text-3xl font-extrabold leading-tight text-slate-50 md:text-4xl lg:text-5xl">
+            Turn your Kenyan degree into your
+            <span class="text-emerald-400">dream job</span>
+            in 45 days.
+          </h1>
 
-          <!-- “Where clients work / target” strip -->
-          <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-            <span class="mr-1 text-slate-500">Our clients work at or target:</span>
+          <p class="mt-4 text-sm text-slate-300 md:text-base">
+            AI Career Accelerator is a step-by-step system that takes you from
+            <span class="font-semibold text-emerald-200">“no replies”</span>
+            to real interviews at serious Kenyan employers. We combine AI, real
+            recruiter insights, and a guided job search plan so you stop guessing
+            and start applying like a pro.
+          </p>
+
+          <p class="mt-3 text-sm text-emerald-200">
+            We aim for 3 interviews in 45 days when you follow the system.
+          </p>
+
+          <!-- Where clients work -->
+          <div class="mt-5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+            <span class="mr-1 text-slate-500">Clients work at or target:</span>
             <span class="inline-flex items-center gap-1 rounded-full border border-slate-700/70 px-2 py-0.5">
               <i class="fa-solid fa-building text-emerald-300"></i>
               <span>Safaricom</span>
@@ -217,429 +149,107 @@
             </span>
           </div>
 
-          <!-- Stats -->
-          <div class="mt-4 flex flex-wrap gap-4 text-xs text-slate-300">
-            <div class="glass flex flex-1 min-w-[140px] items-center justify-between rounded-2xl px-3 py-2">
-              <div>
-                <div class="text-[11px] uppercase tracking-wide text-slate-400">
-                  Interview Rate
-                </div>
-                <div class="text-lg font-bold text-emerald-400">
-                  82%
-                </div>
-              </div>
-              <div class="text-right text-[11px] text-slate-400">
-                Avg. clients who<br />
-                get called back
-              </div>
-            </div>
-            <div class="glass flex flex-1 min-w-[140px] items-center justify-between rounded-2xl px-3 py-2">
-              <div>
-                <div class="text-[11px] uppercase tracking-wide text-slate-400">
-                  Time to First Interview
-                </div>
-                <div class="text-lg font-bold text-emerald-200">
-                  14 days
-                </div>
-              </div>
-              <div class="text-right text-[11px] text-slate-400">
-                From serious<br />
-                applications
-              </div>
-            </div>
-          </div>
-
-          <!-- CTA Buttons -->
-          <div class="flex flex-wrap items-center gap-3 pt-1">
-            <a
-              href="https://wa.me/254722285538?text=Hi%20I%27m%20interested%20in%20AI%20Career%20Accelerator"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-400 px-5 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:text-sm"
-            >
-              <i class="fa-brands fa-whatsapp"></i>
-              Book Free Strategy Call
-            </a>
-
+          <!-- Hero CTAs -->
+          <div class="mt-6 flex flex-wrap gap-3">
             <button
-              type="button"
+              class="inline-flex flex-1 items-center justify-center rounded-full bg-emerald-400 px-5 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:flex-none md:px-6 md:text-sm"
               onclick="window.location.href='https://app.aicareer.co.ke/'"
-              class="inline-flex items-center justify-center gap-2 rounded-full border border-slate-700/80 px-4 py-2 text-xs font-medium text-slate-200 hover:border-emerald-400/70 hover:text-emerald-300 md:text-sm"
             >
-              <i class="fa-solid fa-arrow-right"></i>
-              Enter Web App
+              <i class="fa-solid fa-arrow-right mr-2"></i>
+              Enter App – Generate My AI Job Kit
+            </button>
+            <button
+              class="inline-flex items-center justify-center rounded-full border border-slate-700/80 px-4 py-2 text-xs font-medium text-slate-200 hover:border-emerald-400/70 hover:text-emerald-300 md:text-sm"
+              onclick="window.location.href='https://wa.me/254722285538?text=Hi%20I%27m%20interested%20in%20AI%20Career%20Accelerator'"
+            >
+              <i class="fa-brands fa-whatsapp mr-2"></i>
+              Talk to a Coach on WhatsApp
             </button>
           </div>
 
-          <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-check text-emerald-400"></i>
-              <span>No generic Upwork CV templates</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-check text-emerald-400"></i>
-              <span>Built for Kenyan job boards (BrighterMonday, Fuzu, LinkedIn)</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-check text-emerald-400"></i>
-              <span>Works for grads & mid-level pros</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right -->
-        <div class="mt-6 flex-1 md:mt-0">
-          <div class="glass relative h-full rounded-3xl p-4 md:p-5">
-            <div class="mb-4 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] uppercase tracking-wider text-slate-400">
-                  Live AI Career Coach
-                </div>
-                <div class="text-sm font-semibold text-slate-100">
-                  See your CV through a recruiter’s eyes
-                </div>
-              </div>
-              <div class="flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-1">
-                <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-                <span class="text-[11px] text-emerald-300">Online</span>
-              </div>
-            </div>
-
-            <div
-              class="space-y-3 rounded-2xl bg-slate-900/80 p-3 text-xs text-slate-200"
-            >
-              <div class="flex items-start gap-2">
-                <div
-                  class="mt-0.5 h-6 w-6 rounded-full bg-emerald-400/15 text-[10px] flex items-center justify-center text-emerald-300"
-                >
-                  AI
-                </div>
-                <div>
-                  <p class="text-[11px] text-slate-400">AI Coach</p>
-                  <p>
-                    I’ve reviewed your CV and I’d rank it
-                    <span class="font-semibold text-emerald-300">5/10</span> for the
-                    roles you’re targeting. Biggest gaps:
-                  </p>
-                  <ul class="mt-1 list-disc pl-5 text-slate-300">
-                    <li>No clear outcome/impact in your bullet points</li>
-                    <li>Profile summary is generic (“hardworking, team player”)</li>
-                    <li>Skills section doesn’t match most JD keywords</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div class="flex items-start gap-2">
-                <div
-                  class="mt-0.5 h-6 w-6 rounded-full bg-sky-400/10 text-[10px] flex items-center justify-center text-sky-300"
-                >
-                  YOU
-                </div>
-                <div>
-                  <p class="text-[11px] text-slate-400">You</p>
-                  <p>
-                    Rewrite this to a CV that can get me interviews at Safaricom,
-                    KCB, UN, or a good tech startup.
-                  </p>
-                </div>
-              </div>
-
-              <div class="flex items-start gap-2 rounded-2xl bg-slate-900/90 p-3">
-                <div
-                  class="mt-0.5 h-6 w-6 rounded-full bg-emerald-400/15 text-[10px] flex items-center justify-center text-emerald-300"
-                >
-                  AI
-                </div>
-                <div>
-                  <p class="text-[11px] text-slate-400">AI Coach</p>
-                  <p>
-                    I’ll rewrite your CV to focus on outcomes, metrics, and
-                    keywords these employers filter for. Expect:
-                  </p>
-                  <ul class="mt-1 list-disc pl-5 text-slate-300">
-                    <li>Stronger profile summary with proof, not adjectives</li>
-                    <li>Bullet points with numbers (revenue, growth, efficiency)</li>
-                    <li>Skills aligned to actual JDs you apply for</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-4 flex items-center justify-between text-[11px] text-slate-400">
-              <div class="flex items-center gap-2">
-                <i class="fa-solid fa-shield-halved text-emerald-400"></i>
-                <span>ATS-friendly formatting</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <i class="fa-solid fa-clock text-emerald-400"></i>
-                <span>Typical turnaround: 48–72 hours</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- How It Works -->
-    <section
-      id="how-it-works"
-      class="section-gradient mt-12 rounded-3xl border border-slate-800/60 p-5 md:p-8"
-    >
-      <div class="mx-auto max-w-3xl text-center">
-        <h2 class="text-2xl font-extrabold text-slate-50 md:text-3xl">
-          How the AI Career Accelerator works
-        </h2>
-        <p class="mt-2 text-sm text-slate-400 md:text-base">
-          Three focused weeks. One clear outcome: you stop shooting in the dark
-          and start applying like someone who understands how hiring works in
-          Kenya.
-        </p>
-      </div>
-
-      <div class="mt-8 grid gap-4 md:grid-cols-3">
-        <div class="glass rounded-2xl p-4">
-          <div
-            class="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/10 text-xs font-semibold text-emerald-300"
-          >
-            1
-          </div>
-          <h3 class="text-sm font-semibold text-slate-50">
-            Deep-dive career audit
-          </h3>
-          <p class="mt-2 text-xs text-slate-400">
-            We review your current CV, LinkedIn, target roles, and constraints
-            (experience, grades, gaps, industry changes). You’ll know exactly
-            why you’re not getting callbacks.
-          </p>
-        </div>
-
-        <div class="glass rounded-2xl p-4">
-          <div
-            class="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-400/10 text-xs font-semibold text-sky-300"
-          >
-            2
-          </div>
-          <h3 class="text-sm font-semibold text-slate-50">
-            AI-powered CV & cover letter overhaul
-          </h3>
-          <p class="mt-2 text-xs text-slate-400">
-            We run your documents through our AI career engine + human editor
-            to produce a punchy, ATS-optimised CV and 2–3 reusable cover letter
-            templates.
-          </p>
-        </div>
-
-        <div class="glass rounded-2xl p-4">
-          <div
-            class="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-purple-400/10 text-xs font-semibold text-purple-300"
-          >
-            3
-          </div>
-          <h3 class="text-sm font-semibold text-slate-50">
-            Guided job search & interview prep
-          </h3>
-          <p class="mt-2 text-xs text-slate-400">
-            We help you pick the right roles, customise applications, and prep
-            for interviews&mdash;including mock interview questions and answer
-            frameworks used by actual hiring managers.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Results -->
-    <section
-      id="results"
-      class="mt-12 rounded-3xl border border-slate-800/60 bg-slate-950/70 p-5 md:p-8"
-    >
-      <div class="flex flex-col gap-6 md:flex-row md:items-start">
-        <div class="md:w-1/3">
-          <h2 class="text-2xl font-extrabold text-slate-50 md:text-3xl">
-            Real Kenyan results
-          </h2>
-          <p class="mt-2 text-sm text-slate-400 md:text-base">
-            We work with technical & non-technical professionals across banking,
-            NGO, tech, FMCG, consulting and startups.
-          </p>
-        </div>
-
-        <div class="grid flex-1 gap-4 md:grid-cols-2">
-          <div class="glass rounded-2xl p-4 text-xs text-slate-300">
-            <p class="text-[11px] uppercase tracking-wide text-emerald-300">
-              Graduate → Data Analyst (Nairobi)
-            </p>
-            <p class="mt-1 text-[11px] text-slate-400">
-              Previously: sending 100+ CVs on BrighterMonday, 0 responses.
-            </p>
-            <ul class="mt-2 list-disc pl-4">
-              <li>New CV + LinkedIn positioning for data roles</li>
-              <li>Targeted 12 roles in banks, SACCOs, telcos</li>
-              <li>4 interview invites in 3 weeks</li>
-            </ul>
-          </div>
-          <div class="glass rounded-2xl p-4 text-xs text-slate-300">
-            <p class="text-[11px] uppercase tracking-wide text-emerald-300">
-              Customer Service → Operations Lead
-            </p>
-            <p class="mt-1 text-[11px] text-slate-400">
-              Previously: 5+ years same title, no promotion, “support staff”.
-            </p>
-            <ul class="mt-2 list-disc pl-4">
-              <li>Reframed CV around outcomes, not duties</li>
-              <li>Showcased leadership & process improvement</li>
-              <li>Offer from regional startup at +45% salary</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- FAQ -->
-    <section
-      id="faq"
-      class="mt-12 rounded-3xl border border-slate-800/60 bg-slate-950/80 p-5 md:p-8"
-    >
-      <h2
-        class="mb-6 text-center text-2xl font-extrabold text-emerald-400 md:text-3xl"
-      >
-        FAQ – Before you book
-      </h2>
-
-      <div class="mx-auto max-w-3xl space-y-3 text-sm text-slate-200">
-        <details class="glass rounded-2xl p-3">
-          <summary class="cursor-pointer list-none">
-            <div class="flex items-center justify-between gap-4">
-              <span class="text-sm font-semibold">
-                Is this only for tech people?
-              </span>
-              <i class="fa-solid fa-chevron-down text-xs text-slate-400"></i>
-            </div>
-          </summary>
-          <p class="mt-2 text-xs text-slate-400">
-            No. We work with software engineers, data analysts, finance, HR,
-            admin, project managers, NGO professionals and more. The AI engine
-            changes prompts based on your industry.
-          </p>
-        </details>
-
-        <details class="glass rounded-2xl p-3">
-          <summary class="cursor-pointer list-none">
-            <div class="flex items-center justify-between gap-4">
-              <span class="text-sm font-semibold">
-                What if I have no experience?
-              </span>
-              <i class="fa-solid fa-chevron-down text-xs text-slate-400"></i>
-            </div>
-          </summary>
-          <p class="mt-2 text-xs text-slate-400">
-            We specialise in fresh graduates and career changers. We help you
-            mine projects, volunteering, attachments and coursework for
-            evidence, so your CV still shows value even without formal roles.
-          </p>
-        </details>
-
-        <details class="glass rounded-2xl p-3">
-          <summary class="cursor-pointer list-none">
-            <div class="flex items-center justify-between gap-4">
-              <span class="text-sm font-semibold">
-                Is this a done-for-you service or do I do the work?
-              </span>
-              <i class="fa-solid fa-chevron-down text-xs text-slate-400"></i>
-            </div>
-          </summary>
-          <p class="mt-2 text-xs text-slate-400">
-            It’s a hybrid. The AI + templates do the heavy lifting on CVs and
-            cover letters. You’ll answer structured questions and approve
-            content so it’s still authentically yours.
-          </p>
-        </details>
-      </div>
-    </section>
-
-    <!-- Pricing -->
-    <section
-      id="pricing"
-      class="mt-12 rounded-3xl border border-emerald-500/40 bg-emerald-500/5 p-5 md:p-8"
-    >
-      <div class="flex flex-col gap-6 md:flex-row md:items-center">
-        <div class="space-y-2 md:w-2/3">
-          <h2 class="text-2xl font-extrabold text-emerald-300 md:text-3xl">
-            Simple, transparent investment
-          </h2>
-          <p class="text-sm text-emerald-100/80 md:text-base">
-            One-time programme fee. No subscriptions. You keep all templates,
-            CVs and systems we build together.
-          </p>
-          <ul class="mt-2 space-y-1 text-sm text-emerald-100/90">
+          <ul class="mt-4 space-y-1 text-[11px] text-slate-400 md:text-xs">
             <li class="flex items-center gap-2">
               <i class="fa-solid fa-check text-emerald-400"></i>
-              Custom ATS-optimised CV & cover letters
+              <span>Built specifically for the Kenyan job market</span>
             </li>
             <li class="flex items-center gap-2">
               <i class="fa-solid fa-check text-emerald-400"></i>
-              30-day guided job search plan
+              <span>AI-written CV, cover letters &amp; follow-up emails (human-reviewed)</span>
             </li>
             <li class="flex items-center gap-2">
               <i class="fa-solid fa-check text-emerald-400"></i>
-              Interview prep templates & practice questions
+              <span>Pay once via M-Pesa • Lifetime access</span>
             </li>
           </ul>
         </div>
 
-        <div
-          class="glass flex flex-1 flex-col items-center justify-center rounded-2xl p-5 text-center"
-        >
-          <div class="text-xs uppercase tracking-wide text-emerald-300">
-            Launch Cohort Pricing
+        <!-- Right: pricing card -->
+        <div class="mt-6 w-full md:mt-0 md:w-[360px]">
+          <div class="rounded-3xl border border-slate-800/70 bg-slate-900/80 p-4 shadow-lg shadow-emerald-500/10">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-xs uppercase tracking-wide text-emerald-300">
+                  Premium Access
+                </p>
+                <p class="mt-0.5 text-[11px] text-slate-400">
+                  One-time payment • Lifetime access • All future updates
+                </p>
+              </div>
+              <span class="text-[11px] text-amber-300">
+                <i class="fa-solid fa-bolt mr-1"></i>Launch offer
+              </span>
+            </div>
+
+            <div class="mt-4 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold text-emerald-400">KSh 1,000</span>
+              <span class="text-xs text-slate-500 line-through">KSh 1,500</span>
+            </div>
+
+            <p class="mt-1 text-xs text-slate-400">
+              Unlock full AI resume, cover letter &amp; interview toolkit, plus the guided
+              job search system.
+            </p>
+
+            <!-- Payment explanation (no numbers) -->
+            <div class="mt-4 rounded-2xl border border-slate-700 bg-slate-950/70 p-3 text-xs">
+              <p class="mb-2 font-semibold text-slate-100">
+                How payment works
+              </p>
+              <ol class="ml-4 list-decimal space-y-1 text-slate-300">
+                <li>Click the WhatsApp button below.</li>
+                <li>We share secure M-Pesa / IntaSend payment instructions.</li>
+                <li>After payment, we unlock your AI Job Kit and send you a confirmation.</li>
+              </ol>
+            </div>
+
+            <button
+              class="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300 md:text-sm"
+              onclick="window.location.href='https://wa.me/254722285538?text=Hi%20I%27m%20ready%20to%20join%20AI%20Career%20Accelerator'"
+            >
+              <i class="fa-brands fa-whatsapp"></i>
+              Message us on WhatsApp to unlock
+            </button>
+
+            <p class="mt-3 text-[11px] text-slate-500">
+              You’ll never be asked to enter card details directly on this page. All payments
+              go through secure M-Pesa / IntaSend flows.
+            </p>
           </div>
-          <div class="mt-2 flex items-baseline justify-center gap-2">
-            <span class="text-3xl font-extrabold text-emerald-400">KES 1,000</span>
-            <span class="text-xs text-slate-400 line-through">KES 1,500</span>
-          </div>
-          <p class="mt-1 text-xs text-slate-400">
-            Pay once. Get all materials + support for 30 days.
-          </p>
-          <a
-            href="https://wa.me/254722285538?text=Hi%20I%27m%20ready%20to%20join%20AI%20Career%20Accelerator"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-3 inline-flex items-center justify-center gap-2 rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-emerald-400/40 hover:bg-emerald-300"
-          >
-            <i class="fa-brands fa-whatsapp"></i>
-            Talk to a human first
-          </a>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
+  <!-- Simple footer -->
   <footer class="border-t border-slate-800/60 bg-slate-950/90">
-    <div
-      class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-4 text-[11px] text-slate-500 md:flex-row md:px-6"
-    >
-      <div>&copy; <span id="year"></span> AI Career Accelerator Kenya. All rights reserved.</div>
-      <div class="flex flex-wrap items-center gap-3">
-        <span>Built for Kenyan professionals.</span>
-      </div>
+    <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-4 text-[11px] text-slate-500 md:flex-row md:px-6">
+      <span>&copy; <span id="year"></span> AI Career Accelerator Kenya. All rights reserved.</span>
+      <span>Built for Kenyan graduates &amp; early-career professionals.</span>
     </div>
   </footer>
 
   <script>
-    // Year
     document.getElementById("year").textContent = new Date().getFullYear();
-
-    // Optional: only one FAQ open at a time
-    const details = document.querySelectorAll("#faq details");
-    details.forEach((d) => {
-      d.addEventListener("toggle", () => {
-        if (d.open) {
-          details.forEach((other) => {
-            if (other !== d) other.open = false;
-          });
-        }
-      });
-    });
   </script>
 </body>
 </html>
