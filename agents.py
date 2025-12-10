@@ -23,27 +23,27 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 def _get_api_key() -> str:
     """
     Resolve the Gemini API key.
-    Priority 1: Environment Variable (Railway / Cloud Deployment)
-    Priority 2: Streamlit Secrets (Local Development via .streamlit/secrets.toml)
+    NEW PRIORITY ORDER (Fix ghost ENV issues):
+    1. Streamlit Secrets (Local & Railway)
+    2. Environment Variable (Fallback only)
     """
-    # 1. Try Environment Variable first
+    # 1. Prefer Streamlit secrets
+    try:
+        key = st.secrets["GEMINI_API_KEY"]
+        if key:
+            return key
+    except Exception:
+        pass
+
+    # 2. Fallback: environment variable
     key = os.getenv("GEMINI_API_KEY")
     if key:
         return key
 
-    # 2. Try Streamlit Secrets
-    try:
-        # st.secrets behaves like a dictionary
-        key = st.secrets["GEMINI_API_KEY"]
-        if key:
-            return key
-    except (FileNotFoundError, KeyError):
-        pass
-
-    # 3. If neither found, raise error
+    # 3. Nothing found → error
     raise RuntimeError(
         "Gemini API key not found. "
-        "Set 'GEMINI_API_KEY' in .streamlit/secrets.toml (Local) or as an Environment Variable (Deployment)."
+        "Add GEMINI_API_KEY to .streamlit/secrets.toml or Railway Variables."
     )
 
 
@@ -55,8 +55,6 @@ def _get_gemini_model():
     api_key = _get_api_key()
     genai.configure(api_key=api_key)
 
-    # You can change this if your key supports a different model
-    # Common options: "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"
     model_name = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     try:
@@ -81,29 +79,24 @@ def _extract_json_block(raw: str) -> str:
     if not raw:
         return raw
 
-    # ```json ... ```
     fenced = re.search(r"```json(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
     if fenced:
         return fenced.group(1).strip()
 
-    # ``` ... ``` (any language)
     fenced_any = re.search(r"```(.*?)```", raw, flags=re.DOTALL)
     if fenced_any:
         candidate = fenced_any.group(1).strip()
         if candidate.startswith("{") or candidate.startswith("["):
             return candidate
 
-    # First {...} block
     brace = re.search(r"\{.*\}", raw, flags=re.DOTALL)
     if brace:
         return brace.group(0)
 
-    # First [...] block
     array = re.search(r"\[.*\]", raw, flags=re.DOTALL)
     if array:
         return array.group(0)
 
-    # Fallback: return as-is
     return raw.strip()
 
 
@@ -115,11 +108,9 @@ def _safe_json_loads(raw: Optional[str]) -> Any:
     if not raw:
         raise ValueError("Empty response from model")
 
-    # First attempt: direct JSON
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        # Second attempt: extract JSON-looking block from raw
         candidate = _extract_json_block(raw)
         return json.loads(candidate)
 
@@ -128,7 +119,6 @@ def _get_response_text(response: Any, label: str) -> str:
     """
     Safely extract text from a google-generativeai response.
     """
-    # Prefer candidates → content.parts → text
     candidates = getattr(response, "candidates", None)
     if candidates:
         for cand in candidates:
@@ -137,30 +127,25 @@ def _get_response_text(response: Any, label: str) -> str:
             if parts:
                 texts: List[str] = []
                 for p in parts:
-                    # Newer SDK: Part objects with .text
                     if hasattr(p, "text") and p.text:
                         texts.append(p.text)
-                    # Just in case it's dict-like
                     elif isinstance(p, dict) and p.get("text"):
                         texts.append(str(p["text"]))
                 if texts:
                     return "\n".join(texts).strip()
 
-        # No parts with text; inspect finish_reason for better error
         first = candidates[0]
         finish_reason = getattr(first, "finish_reason", None)
         raise RuntimeError(
-            f"Gemini returned no text for {label} (finish_reason={finish_reason}). "
-            "Try again with a more detailed input or slightly different wording."
+            f"Gemini returned no text for {label} (finish_reason={finish_reason})."
         )
 
-    # Fallback: some responses still expose .text directly
     txt = getattr(response, "text", None)
     if txt:
         return str(txt).strip()
 
     raise RuntimeError(
-        f"Gemini returned an empty response object for {label} (no candidates, no text)."
+        f"Gemini returned an empty response object for {label}."
     )
 
 
@@ -170,8 +155,7 @@ def _get_response_text(response: Any, label: str) -> str:
 
 def extract_text_from_pdf(file) -> str:
     """
-    Extract text from an uploaded PDF (Streamlit's UploadedFile or a file-like object).
-    Returns the concatenated text of all pages, separated by blank lines.
+    Extract text from an uploaded PDF.
     """
     if file is None:
         return ""
@@ -204,27 +188,23 @@ def analyze_job(job_description: str) -> Dict[str, Any]:
     prompt = f"""
 You are an expert Kenyan recruiter working for top employers like Safaricom, KCB, Equity Bank, Deloitte, PwC, UN, Microsoft ADC, and Twiga Foods.
 
-Analyze the following job description and return ONLY a valid JSON object with no markdown, no explanation.
+Analyze the following job description and return ONLY a valid JSON object.
 
 JOB DESCRIPTION:
 \"\"\"{job_description}\"\"\"
 
 
-Return JSON with exactly these keys:
-
+Return JSON:
 {{
-  "role_name": "string - best guess at job title",
-  "company_name": "string - employer name or 'Confidential'",
-  "seniority": "Entry-level | Mid-level | Senior | Internship | Graduate Trainee",
-  "summary": "2-3 sentence plain English summary of the role",
-  "hard_skills": ["Python", "SQL", "Excel", ...],
-  "soft_skills": ["Leadership", "Communication", ...],
-  "keywords": ["Agile", "Stakeholder Management", ...],
-  "inferred_profile": "Early-career Analyst | Mid-level Manager | Senior Engineer | etc."
+  "role_name": "",
+  "company_name": "",
+  "seniority": "",
+  "summary": "",
+  "hard_skills": [],
+  "soft_skills": [],
+  "keywords": [],
+  "inferred_profile": ""
 }}
-
-
-Return only the JSON. No backticks, no explanation.
 """
 
     response = model.generate_content(
@@ -244,55 +224,19 @@ Return only the JSON. No backticks, no explanation.
 # ============================================================
 
 def rewrite_resume(resume_text: str, job_analysis: Dict[str, Any]) -> str:
-    """
-    Rewrite the user's resume as ATS-friendly Markdown tailored to the job.
-    """
     model = _get_gemini_model()
-
     role = job_analysis.get("role_name", "this role")
 
     prompt = f"""
-You are Kenya's top resume writer for candidates applying to {role} roles.
+Rewrite the user's resume in ATS-friendly Markdown based on this role:
 
-Using the user's raw resume and the job analysis below, rewrite their resume in clean, ATS-friendly Markdown.
+ROLE: {role}
 
 JOB ANALYSIS:
 {json.dumps(job_analysis, indent=2)}
 
-USER RESUME (raw text):
+RESUME:
 \"\"\"{resume_text}\"\"\"
-
-
-RULES:
-- Use Kenyan corporate language and realistic achievements.
-- Add metrics where possible (e.g., "Increased sales by 43%", "Managed team of 12").
-- If dates are missing, write "(Dates Not Provided)".
-- Assume early-career unless seniority says otherwise.
-
-OUTPUT FORMAT (Markdown only, no JSON):
-
-## SUMMARY
-3–5 sentences about experience and value.
-
-## EXPERIENCE
-**Job Title** | Company | Location | Dates
-- Action → Result → Metric
-- ...
-
-## EDUCATION
-- Degree | Institution | Year
-
-## KEY SKILLS
-- Technical: Python, SQL, Power BI
-- Business: Financial Modeling, Strategy
-- Tools: Excel, Tableau
-
-## CORE COMPETENCIES
-- Stakeholder Management
-- Data-Driven Decision Making
-- ...
-
-Use only simple Markdown. No tables, no emojis, no images.
 """
 
     response = model.generate_content(
@@ -305,35 +249,29 @@ Use only simple Markdown. No tables, no emojis, no images.
 
     text = _get_response_text(response, "resume rewrite")
     if not text:
-        raise RuntimeError("Gemini returned an empty response for resume rewrite")
+        raise RuntimeError("Gemini returned empty resume rewrite")
     return text
 
 
 # ============================================================
-# Cover Letter & Emails
+# Cover Letter
 # ============================================================
 
 def generate_cover_letter(resume_text: str, job_analysis: Dict[str, Any]) -> str:
-    """
-    Generate a tailored cover letter (plain text / Markdown).
-    """
     model = _get_gemini_model()
     role = job_analysis.get("role_name", "this position")
-    company = job_analysis.get("company_name", "your esteemed organization")
+    company = job_analysis.get("company_name", "your organization")
 
     prompt = f"""
-Write a professional, warm Kenyan cover letter (4–6 short paragraphs) for the role below.
+Write a Kenyan-style cover letter for:
 
 Role: {role}
 Company: {company}
-Analysis: {json.dumps(job_analysis)}
 
-Candidate resume:
+Resume:
 \"\"\"{resume_text}\"\"\"
 
-
-Tone: Confident but respectful. Reference 2–3 achievements with metrics. End with a strong call to action.
-Return plain text or light Markdown only (no JSON, no code fences).
+Keep tone professional and warm. No JSON.
 """
 
     response = model.generate_content(
@@ -346,39 +284,22 @@ Return plain text or light Markdown only (no JSON, no code fences).
 
     text = _get_response_text(response, "cover letter")
     if not text:
-        raise RuntimeError("Gemini returned an empty response for cover letter")
+        raise RuntimeError("Gemini returned empty cover letter")
     return text
 
 
-def generate_emails(job_analysis: Dict[str, Any]) -> List[Dict[str, str]]:
-    """
-    Generate a 3-email follow-up sequence as a JSON array.
+# ============================================================
+# Follow-Up Emails
+# ============================================================
 
-    Returns a list of dicts with keys: label, subject, body.
-    If parsing fails, returns an empty list.
-    """
+def generate_emails(job_analysis: Dict[str, Any]) -> List[Dict[str, str]]:
     model = _get_gemini_model()
     role = job_analysis.get("role_name", "the position")
-    company = job_analysis.get("company_name", "your organization")
+    company = job_analysis.get("company_name", "the company")
 
     prompt = f"""
-Create a 3-email follow-up sequence for a candidate who applied to {role} at {company}.
-
-Return ONLY a JSON array with objects containing:
-- "label": e.g. "3 days after application"
-- "subject":
-- "body": full polite Kenyan corporate email
-
-Example:
-[
-  {{
-    "label": "Day 3 Follow-Up",
-    "subject": "Following up on my application for {role}",
-    "body": "Dear Hiring Manager..."
-  }}
-]
-
-No extra text. No explanation. JSON only.
+Write 3 follow-up emails for the role {role} at {company}.
+Return ONLY a JSON array.
 """
 
     response = model.generate_content(
@@ -397,23 +318,14 @@ No extra text. No explanation. JSON only.
         data = _safe_json_loads(raw)
         if not isinstance(data, list):
             return []
-
-        normalized: List[Dict[str, str]] = []
+        normalized = []
         for item in data[:3]:
-            if not isinstance(item, dict):
-                continue
-            subject = (item.get("subject") or "").strip()
-            body = (item.get("body") or "").strip()
-            if not subject or not body:
-                continue
-            normalized.append(
-                {
-                    "label": (item.get("label") or "Email").strip(),
-                    "subject": subject,
-                    "body": body,
-                }
-            )
-        return normalized
+            if isinstance(item, dict):
+                normalized.append({
+                    "label": item.get("label", "").strip(),
+                    "subject": item.get("subject", "").strip(),
+                    "body": item.get("body", "").strip(),
+                })
+        return [e for e in normalized if e["subject"] and e["body"]]
     except Exception:
-        # If parsing fails, don't crash the app – just return no emails.
         return []
