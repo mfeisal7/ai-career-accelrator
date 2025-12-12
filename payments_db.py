@@ -1,15 +1,18 @@
 """
 Secure, thread-safe SQLite payment database for AI Career Accelerator.
-Used by Streamlit app to store who has paid (manually marked via admin panel).
+Used by Streamlit app to store who has paid (manually marked via admin panel),
+PLUS: persist generated AI outputs so refresh doesn't lose content.
 """
 
 import os
+import json
 import sqlite3
 import threading
 import logging
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -84,8 +87,11 @@ def init_db() -> None:
     """
     Create the payments table and indexes if they don't exist yet,
     and run lightweight migrations to ensure schema compatibility.
+
+    Also creates a user_outputs table to persist generated AI content.
     """
     with get_connection() as conn:
+        # Payments table
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS payments (
@@ -101,13 +107,10 @@ def init_db() -> None:
             )
             """
         )
-
         _ensure_columns(conn)
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON payments(user_id)")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_paid "
             "ON payments(user_id, is_paid) WHERE is_paid = 1"
@@ -119,8 +122,29 @@ def init_db() -> None:
         except sqlite3.OperationalError as e:
             logger.warning(f"[payments_db] Could not create idx_created_at index: {e}")
 
+        # NEW: Persisted AI outputs table (keyed by user_id)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_outputs (
+                user_id         TEXT PRIMARY KEY,
+                ai_resume_md     TEXT,
+                ai_cover_letter  TEXT,
+                ai_emails_json   TEXT,
+                created_at       TEXT DEFAULT (datetime('now')),
+                updated_at       TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_outputs_updated_at ON user_outputs(updated_at)"
+        )
+
         logger.info(f"[payments_db] Initialized/migrated DB at {DB_PATH}")
 
+
+# ============================================================
+# Payments
+# ============================================================
 
 def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> bool:
     """
@@ -277,16 +301,120 @@ def mark_user_paid(user_id: str) -> bool:
         return False
 
 
-def get_user_payments(user_id: str):
+def get_user_payments(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """
-    Return a list of all payment records for a user, newest first.
+    Backwards-compatible:
+      - If user_id provided: return that user's payment records (newest first)
+      - If user_id is None: return recent payment records overall (newest first)
     """
     with get_connection() as conn:
-        cursor = conn.execute(
-            "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,),
-        )
+        if user_id:
+            cursor = conn.execute(
+                "SELECT * FROM payments WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT * FROM payments ORDER BY created_at DESC LIMIT ?",
+                (int(limit),),
+            )
         return [dict(row) for row in cursor.fetchall()]
+
+
+# ============================================================
+# NEW: Persisted AI Outputs
+# ============================================================
+
+def save_user_output(
+    user_id: str,
+    resume: str,
+    cover_letter: str,
+    emails,
+) -> bool:
+    """
+    Persist generated content keyed by user_id.
+    Idempotent: overwrites the latest content for the user.
+    """
+    if not user_id:
+        return False
+
+    emails_json = None
+    try:
+        emails_json = json.dumps(emails or [], ensure_ascii=False)
+    except Exception:
+        # If emails isn't JSON-serializable, store a safe fallback
+        emails_json = json.dumps([], ensure_ascii=False)
+
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_outputs (user_id, ai_resume_md, ai_cover_letter, ai_emails_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+                ON CONFLICT(user_id) DO UPDATE SET
+                    ai_resume_md = excluded.ai_resume_md,
+                    ai_cover_letter = excluded.ai_cover_letter,
+                    ai_emails_json = excluded.ai_emails_json,
+                    updated_at = datetime('now')
+                """,
+                (user_id, resume or "", cover_letter or "", emails_json),
+            )
+        return True
+    except Exception as e:
+        logger.error(f"[payments_db] save_user_output error: {e}")
+        return False
+
+
+def load_user_output(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Load previously generated content for a user.
+    Returns dict with keys: ai_resume_markdown, ai_cover_letter, ai_emails
+    or None if nothing saved.
+    """
+    if not user_id:
+        return None
+
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT ai_resume_md, ai_cover_letter, ai_emails_json
+                FROM user_outputs
+                WHERE user_id = ?
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            emails = []
+            try:
+                emails = json.loads(row["ai_emails_json"] or "[]")
+            except Exception:
+                emails = []
+
+            return {
+                "ai_resume_markdown": row["ai_resume_md"] or "",
+                "ai_cover_letter": row["ai_cover_letter"] or "",
+                "ai_emails": emails or [],
+            }
+    except Exception as e:
+        logger.error(f"[payments_db] load_user_output error: {e}")
+        return None
+
+
+# ============================================================
+# Backwards-compatible aliases (so app.py/admin_app.py keep working)
+# ============================================================
+
+def get_user_payment_status(user_id: str) -> bool:
+    return is_user_paid(user_id)
+
+
+def mark_user_as_paid(user_id: str) -> bool:
+    return mark_user_paid(user_id)
 
 
 # Auto-init on import

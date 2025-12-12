@@ -19,7 +19,8 @@ from agents import (
 from payments_db import (
     init_db,
     get_user_payment_status,
-    mark_user_as_paid,
+    save_user_output,
+    load_user_output,
 )
 
 st.set_page_config(
@@ -27,7 +28,6 @@ st.set_page_config(
     page_icon="🧠",
     layout="wide",
 )
-
 
 # ============================================================
 # Utility: Safe WhatsApp Number
@@ -92,6 +92,26 @@ def _ensure_user_id() -> str:
     )
 
     return user_id
+
+
+def _hydrate_session_from_db(user_id: str) -> None:
+    """
+    Restore generated content from DB into st.session_state.
+    This is what makes refresh safe (paid or unpaid).
+    """
+    saved = load_user_output(user_id)
+    if not saved:
+        return
+
+    # Only set if missing, to avoid overwriting current in-session edits
+    if not st.session_state.get("ai_resume_markdown") and saved.get("ai_resume_markdown"):
+        st.session_state["ai_resume_markdown"] = saved["ai_resume_markdown"]
+
+    if not st.session_state.get("ai_cover_letter") and saved.get("ai_cover_letter"):
+        st.session_state["ai_cover_letter"] = saved["ai_cover_letter"]
+
+    if not st.session_state.get("ai_emails") and saved.get("ai_emails") is not None:
+        st.session_state["ai_emails"] = saved.get("ai_emails", [])
 
 
 # ============================================================
@@ -252,8 +272,11 @@ def main():
     user_id = _ensure_user_id()
     st.caption(f"Your user ID: `{user_id}` (used to unlock premium downloads)")
 
-    # Check payment status
+    # Payment status
     paid = get_user_payment_status(user_id)
+
+    # NEW: Hydrate any previously generated content so refresh never loses it
+    _hydrate_session_from_db(user_id)
 
     st.markdown(
         """
@@ -343,6 +366,14 @@ def main():
                         st.session_state["ai_resume_markdown"] = ai_resume
                         st.session_state["ai_cover_letter"] = ai_cover
                         st.session_state["ai_emails"] = ai_emails
+
+                        # NEW: Persist outputs immediately so refresh is safe
+                        save_user_output(
+                            user_id=user_id,
+                            resume=ai_resume,
+                            cover_letter=ai_cover,
+                            emails=ai_emails,
+                        )
 
                         st.success("AI resume, cover letter and emails generated.")
                     except Exception as e:
