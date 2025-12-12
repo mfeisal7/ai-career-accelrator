@@ -16,53 +16,65 @@ from agents import (
     generate_cover_letter,
     generate_emails,
 )
+from payments_db import (
+    init_db,
+    get_user_payment_status,
+    mark_user_as_paid,
+)
 
-# Payments DB (no IntaSend now, just manual “paid” flag)
-from payments_db import init_db, is_user_paid, mark_user_paid
+st.set_page_config(
+    page_title="AI Career Accelerator – Kenyan Job Market",
+    page_icon="🧠",
+    layout="wide",
+)
 
-# ============================================================
-# Configuration & Constants
-# ============================================================
-
-PREMIUM_AMOUNT = 1000
-
-# ============================================================
-# Admin panel switch: if IS_ADMIN_PANEL=1, run admin UI instead
-# ============================================================
-
-if os.getenv("IS_ADMIN_PANEL") == "1":
-    from admin_app import run_admin_panel
-    run_admin_panel()
-    st.stop()
 
 # ============================================================
-# One-time initialization: DB only
+# Utility: Safe WhatsApp Number
 # ============================================================
 
-init_db()
+def _get_whatsapp_number() -> str:
+    """Get the WhatsApp number from environment only.
 
-# ============================================================
-# Session / User ID helpers
-# ============================================================
-
-def get_or_create_user_id() -> str:
+    This removes Streamlit's noisy "No secrets found" message because we do not
+    touch st.secrets anywhere. On Railway, set WHATSAPP_NUMBER as a service
+    variable. If it's missing, we fall back to the default number.
     """
-    Generate a persistent user_id for this browser.
+    env_num = os.getenv("WHATSAPP_NUMBER")
+    if env_num:
+        return env_num.strip()
+
+    # Fallback (keeps existing behavior)
+    return "254722285538"
+
+
+# ============================================================
+# Session State Initialization
+# ============================================================
+
+def _ensure_user_id() -> str:
+    """
+    Ensure we have a stable user_id for tracking payments.
+    Priority:
+      1. URL query param ?user_id=...
+      2. Cookie (if you decide to use cookies later)
+      3. Streamlit session_state
+      4. Fresh UUID
     """
     if "user_id" in st.session_state and st.session_state["user_id"]:
         return st.session_state["user_id"]
 
-    query_params = st.query_params
-    existing_uid = query_params.get("user_id")
-
-    if existing_uid:
-        user_id = existing_uid
-    else:
+    qp = st.query_params
+    user_id = qp.get("user_id", [None])
+    if isinstance(user_id, list):
+        user_id = user_id[0]
+    if not user_id:
         user_id = str(uuid.uuid4())
         st.query_params.update({"user_id": user_id})
 
     st.session_state["user_id"] = user_id
 
+    # Optional: small JS snippet to persist user_id in a cookie (non-critical)
     st.markdown(
         f"""
         <script>
@@ -71,10 +83,7 @@ def get_or_create_user_id() -> str:
             if (!cookies.includes("user_id=")) {{
                 const expires = new Date();
                 expires.setFullYear(expires.getFullYear() + 1);
-                document.cookie =
-                    "user_id={user_id};expires=" +
-                    expires.toUTCString() +
-                    ";path=/;SameSite=Lax";
+                document.cookie = "user_id={user_id}; expires=" + expires.toUTCString() + "; path=/";
             }}
         }})();
         </script>
@@ -85,449 +94,309 @@ def get_or_create_user_id() -> str:
     return user_id
 
 
-@st.cache_data(ttl=30)
-def get_cached_payment_status(user_id: str) -> bool:
-    """
-    Check payment status with a short cache (30s) to reduce DB load
-    on frequent UI reruns.
-    """
-    return is_user_paid(user_id)
-
-
-def _get_whatsapp_number() -> str:
-    """
-    Get the WhatsApp number from environment first, then (optionally) from st.secrets,
-    and finally fall back to a hardcoded default.
-    This avoids 'No secrets found' when secrets.toml is missing.
-    """
-    env_num = os.getenv("WHATSAPP_NUMBER")
-    if env_num:
-        return env_num
-
-    try:
-        return st.secrets["WHATSAPP_NUMBER"]
-    except (FileNotFoundError, KeyError):
-        return "254722285538"
-
-
 # ============================================================
-# Session State Initialization
+# Download Helpers
 # ============================================================
 
-def init_state() -> None:
-    defaults = {
-        "resume_text": "",
-        "job_description": "",
-        "job_analysis_json": {},
-        "final_resume_text": "",
-        "cover_letter_text": "",
-        "follow_up_emails": [],
-        "last_uploaded_filename": "",
-        "resume_input_mode": "Upload PDF Resume",
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-
-# ============================================================
-# CONVERSION UTILITIES
-# ============================================================
-
-def _add_markdown_runs_to_paragraph(paragraph, text: str) -> None:
-    parts = re.split(r"(\*\*.*?\*\*)", text)
-    for part in parts:
-        if not part:
-            continue
-        bold_match = re.fullmatch(r"\*\*(.*?)\*\*", part)
-        if bold_match:
-            run_text = bold_match.group(1)
-            run = paragraph.add_run(run_text)
-            run.bold = True
-        else:
-            paragraph.add_run(part)
-
-
-def to_docx(markdown_text: str) -> BytesIO:
+def _markdown_to_docx(markdown_text: str) -> bytes:
+    """
+    Convert simple Markdown to a .docx binary using python-docx.
+    This is intentionally basic – we just split on headings and paragraphs.
+    """
     doc = Document()
+    lines = markdown_text.splitlines()
 
-    for raw_line in markdown_text.splitlines():
-        line = raw_line.rstrip("\n")
-
-        if not line.strip():
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
             doc.add_paragraph("")
             continue
 
-        stripped = line.lstrip()
-
-        if stripped.startswith("### "):
-            text = stripped[4:]
-            p = doc.add_paragraph()
-            p.style = "Heading 2"
-            _add_markdown_runs_to_paragraph(p, text)
-
-        elif stripped.startswith("## "):
-            text = stripped[3:]
-            p = doc.add_paragraph()
-            p.style = "Heading 1"
-            _add_markdown_runs_to_paragraph(p, text)
-
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            text = stripped[2:]
-            p = doc.add_paragraph(style="List Bullet")
-            _add_markdown_runs_to_paragraph(p, text)
-
+        if stripped.startswith("## "):
+            doc.add_heading(stripped[3:], level=2)
+        elif stripped.startswith("# "):
+            doc.add_heading(stripped[2:], level=1)
         else:
-            p = doc.add_paragraph()
-            _add_markdown_runs_to_paragraph(p, stripped)
+            doc.add_paragraph(stripped)
 
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
-    return buffer
+    return buffer.getvalue()
 
 
-def _strip_markdown_bold(text: str) -> str:
-    return text.replace("**", "")
-
-
-def to_pdf(markdown_text: str) -> bytes:
+def _markdown_to_pdf(markdown_text: str) -> bytes:
+    """
+    Convert simple Markdown text into a basic PDF using fpdf.
+    """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("Helvetica", size=12)
 
-    effective_width = getattr(pdf, "epw", pdf.w - 2 * pdf.l_margin)
+    pdf.set_font("Arial", size=12)
 
-    def sanitize(text: str) -> str:
-        text = _strip_markdown_bold(text)
-        text = text.replace("\t", "    ")
-
-        replacements = {
-            "“": '"', "”": '"', "„": '"', "‟": '"',
-            "‘": "'", "’": "'", "‚": "'",
-            "–": "-", "—": "-", "…": "...",
-        }
-        for src, dst in replacements.items():
-            text = text.replace(src, dst)
-
-        text = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", "", text)
-        # Force Latin-1 to prevent fpdf crashes
-        text = text.encode("latin-1", "replace").decode("latin-1")
-        return text
-
-    for raw_line in markdown_text.splitlines():
-        line = raw_line.rstrip("\n")
-
+    for line in markdown_text.splitlines():
         if not line.strip():
-            pdf.set_x(pdf.l_margin)
-            pdf.ln(4)
+            pdf.ln(5)
             continue
+        pdf.multi_cell(0, 6, line)
 
-        stripped = line.lstrip()
-
-        if stripped.startswith("### "):
-            text = sanitize(stripped[4:])
-            pdf.set_text_color(0, 0, 128)
-            pdf.set_font("Helvetica", "B", 14)
-            pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(effective_width, 8, text)
-            pdf.ln(2)
-
-        elif stripped.startswith("## "):
-            text = sanitize(stripped[3:])
-            pdf.set_text_color(0, 0, 128)
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(effective_width, 8, text)
-            pdf.ln(2)
-
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            text = sanitize(stripped[2:])
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_font("Helvetica", "", 12)
-            bullet_indent = 4
-            pdf.set_x(pdf.l_margin + bullet_indent)
-            pdf.multi_cell(effective_width - bullet_indent, 6, "- " + text)
-
-        else:
-            text = sanitize(stripped)
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_font("Helvetica", "", 12)
-            pdf.set_x(pdf.l_margin)
-            pdf.multi_cell(effective_width, 6, text)
-
-    result = pdf.output(dest="S")
-    if isinstance(result, bytes):
-        return result
-    return result.encode("latin-1")
+    buffer = BytesIO()
+    pdf.output(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ============================================================
-# Premium UI Helpers
+# Premium Download Section
 # ============================================================
 
 def premium_download_section(
+    user_id: str,
     title: str,
     markdown_content: str,
-    filename_base: str,
-    amount: int = PREMIUM_AMOUNT,
-    *,
-    user_is_paid: bool,
-    user_id: str,
+    paid: bool,
+    amount: int = 1000,
 ) -> None:
-    if not markdown_content.strip():
-        st.info(f"Your {title.lower()} will appear here after you run the analysis in the Setup tab.")
-        return
-
-    st.markdown(
-        f"Below is your **{title}**. "
-        "Preview is free. To download in any format, unlock Premium access."
-    )
-
-    st.markdown('<div class="no-copy-container">', unsafe_allow_html=True)
-    st.markdown(markdown_content)
-    st.markdown("</div>", unsafe_allow_html=True)
+    """
+    Show download options for Markdown / Word / PDF, gated by payment status.
+    If unpaid, display manual WhatsApp flow.
+    """
+    st.markdown("---")
+    st.subheader(title)
 
     col_md, col_docx, col_pdf = st.columns(3)
 
-    if user_is_paid:
-        docx_bytes = to_docx(markdown_content)
-        pdf_bytes = to_pdf(markdown_content)
-
+    if paid:
+        # User is paid → full downloads unlocked
         with col_md:
+            st.markdown("### 📄 Download as Markdown")
             st.download_button(
-                label="⬇️ Download as Markdown",
-                data=markdown_content,
-                file_name=f"{filename_base}.md",
+                label="⬇️ Download .md",
+                data=markdown_content.encode("utf-8"),
+                file_name=f"{title.lower().replace(' ', '_')}.md",
                 mime="text/markdown",
             )
+
         with col_docx:
+            st.markdown("### 📝 Download as Word (.docx)")
+            docx_bytes = _markdown_to_docx(markdown_content)
             st.download_button(
-                label="⬇️ Download as Word (DOCX)",
+                label="⬇️ Download .docx",
                 data=docx_bytes,
-                file_name=f"{filename_base}.docx",
+                file_name=f"{title.lower().replace(' ', '_')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
+
         with col_pdf:
+            st.markdown("### 📕 Download as PDF")
+            pdf_bytes = _markdown_to_pdf(markdown_content)
             st.download_button(
-                label="⬇️ Download as PDF",
+                label="⬇️ Download .pdf",
                 data=pdf_bytes,
-                file_name=f"{filename_base}.pdf",
+                file_name=f"{title.lower().replace(' ', '_')}.pdf",
                 mime="application/pdf",
             )
+
     else:
+        # Not paid → show manual WhatsApp payment instructions
+        with col_md:
+            st.markdown("### 🔒 Locked")
+            st.info(
+                "Downloads are locked until payment is confirmed.\n\n"
+                "You can still see the content on the page above."
+            )
+
         with col_docx:
             st.markdown("### 🔓 Premium Unlock (Manual)")
-            st.write(f"To unlock **all {title.lower()} downloads** (Markdown, Word, PDF) for:")
+            st.write(
+                f"To unlock all {title.lower()} downloads "
+                f"(Markdown, Word, PDF) for:"
+            )
             st.write(f"**KES {amount:,}**")
 
-            # FIX: Use safe getter for WhatsApp
             whatsapp_number = _get_whatsapp_number()
-            
+
             whatsapp_message = (
                 "Hi, I want to unlock AI Career Accelerator downloads. "
                 f"My user_id is: {user_id}"
             )
             whatsapp_link = (
-                f"https://wa.me/{whatsapp_number}?text={whatsapp_message.replace(' ', '%20')}"
+                f"https://wa.me/{whatsapp_number}"
+                f"?text={whatsapp_message.replace(' ', '%20')}"
             )
 
             st.write("1. Click the button below to message me on WhatsApp.")
             st.write("2. Pay KES 1,000 via M-Pesa manually.")
-            st.write("3. I will mark your account as paid, then you refresh this page.")
+            st.write("3. I will mark your account as paid, then refresh this page.")
 
             st.link_button("💬 Open WhatsApp & Pay", whatsapp_link)
             st.caption(f"Your user ID: `{user_id}`")
 
         with col_pdf:
-            st.info("After I mark your user as paid, refresh this page and downloads will unlock automatically.")
-
-
-# ============================================================
-# Main App
-# ============================================================
-
-st.set_page_config(page_title="AI Career Accelerator", layout="wide")
-init_state()
-
-user_id = get_or_create_user_id()
-# Use the cached payment checker
-user_is_paid = get_cached_payment_status(user_id)
-
-st.markdown(
-    """
-    <style>
-    .no-copy-container, .no-copy-container * {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-        -webkit-touch-callout: none;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.title("🚀 AI Career Accelerator")
-st.caption("Upload your resume, paste a job description, and generate a complete application kit in minutes.")
-st.info(f"Your user ID (for payment verification): `{user_id}`")
-
-
-# ============================================================
-# Sidebar - Resume Input
-# ============================================================
-
-with st.sidebar:
-    st.header("1. Upload & Configure")
-    input_mode = st.radio(
-        "How do you want to provide your details?",
-        ["Upload PDF Resume", "Enter Text Manually"],
-        key="resume_input_mode",
-    )
-
-    if input_mode == "Upload PDF Resume":
-        uploaded_resume = st.file_uploader(
-            "Upload your Resume (PDF)",
-            type=["pdf"],
-            help="Only machine-readable PDF resumes are supported (no scanned images).",
-        )
-        if uploaded_resume is not None:
-            current_filename = getattr(uploaded_resume, "name", "")
-            should_extract = (
-                not st.session_state.resume_text.strip()
-                or current_filename != st.session_state.last_uploaded_filename
+            st.info(
+                "After payment is confirmed in the admin dashboard, "
+                "refresh this page to unlock your downloads."
             )
 
-            if should_extract:
-                with st.spinner("Extracting text from resume..."):
-                    extracted_text = extract_text_from_pdf(uploaded_resume)
-                
-                if not extracted_text.strip():
-                    st.error("I couldn't extract any text from this PDF. Please ensure it's not a scanned image.")
-                    st.session_state.resume_text = ""
-                    st.session_state.last_uploaded_filename = ""
-                else:
-                    st.session_state.resume_text = extracted_text
-                    st.session_state.last_uploaded_filename = current_filename
-                    st.success(f"Resume '{current_filename}' loaded and parsed successfully!")
 
-        if st.session_state.resume_text.strip():
-            st.caption("✅ Resume text is loaded. You can switch to manual mode to tweak it if you like.")
+# ============================================================
+# Main App Logic
+# ============================================================
 
-    else:
-        st.text_area(
-            "Enter your resume details",
-            key="resume_text",
-            height=250,
-            placeholder="Paste your LinkedIn About section or rough work history here...",
+def main():
+    st.title("AI Career Accelerator – Built for Kenyan Graduates")
+
+    init_db()
+
+    user_id = _ensure_user_id()
+    st.caption(f"Your user ID: `{user_id}` (used to unlock premium downloads)")
+
+    # Check payment status
+    paid = get_user_payment_status(user_id)
+
+    st.markdown(
+        """
+        AI Career Accelerator helps you turn your Kenyan degree into your **dream job** –
+        whether that's tech, data, finance, teaching, healthcare, NGO work, or government.
+
+        1️⃣ Paste a job description  
+        2️⃣ Upload your current CV (or type it in)  
+        3️⃣ Get a Kenyan-market-optimised CV, cover letter and follow-up emails
+        """
+    )
+
+    tab_job, tab_resume, tab_results = st.tabs(
+        ["1. Job Description", "2. Your Resume", "3. AI Output & Downloads"]
+    )
+
+    with tab_job:
+        st.markdown("### Step 1: Paste the Job Description")
+        job_description = st.text_area(
+            "Paste a Kenyan job description (from BrighterMonday, LinkedIn, company site, etc.)",
+            height=260,
         )
-        st.caption("Tip: A rough outline is enough. The AI will polish it into a professional resume.")
 
+        if st.button("🔍 Analyse Job"):
+            if not job_description.strip():
+                st.error("Please paste a job description first.")
+            else:
+                with st.spinner("Analysing job description with AI..."):
+                    try:
+                        analysis = analyze_job(job_description)
+                        st.session_state["job_analysis"] = analysis
+                        st.success("Job analysed successfully.")
+                    except Exception as e:
+                        st.error(f"Failed to analyse job: {e}")
 
-# ============================================================
-# Main Tabs
-# ============================================================
+        if "job_analysis" in st.session_state:
+            st.markdown("#### Job Analysis (for your reference)")
+            st.json(st.session_state["job_analysis"])
 
-tab_setup, tab_resume, tab_cover, tab_emails = st.tabs(
-    ["Setup", "Resume", "Cover Letter", "Email Strategy"]
-)
+    with tab_resume:
+        st.markdown("### Step 2: Provide Your Resume")
 
-with tab_setup:
-    st.header("2. Job Description & Analysis")
-    st.text_area(
-        "Paste the full Job Description here",
-        key="job_description",
-        height=350,
-        placeholder="Paste the complete job posting...",
-    )
+        option = st.radio(
+            "How do you want to provide your CV?",
+            ["Upload PDF Resume", "Enter Text Manually"],
+        )
 
-    col_btn, col_status = st.columns([1, 3])
-    with col_btn:
-        analyze_btn = st.button("Analyze Job & Generate Kit", type="primary", use_container_width=True)
+        resume_text = ""
 
-    if analyze_btn:
-        if not st.session_state.resume_text.strip():
-            st.error("Please provide your resume details.")
-        elif not st.session_state.job_description.strip():
-            st.error("Please paste the full job description.")
+        if option == "Upload PDF Resume":
+            uploaded = st.file_uploader(
+                "Upload your current resume in PDF format", type=["pdf"]
+            )
+            if uploaded is not None:
+                with st.spinner("Extracting text from PDF..."):
+                    try:
+                        resume_text = extract_text_from_pdf(uploaded)
+                        st.success("Successfully extracted text from PDF.")
+                        st.text_area(
+                            "Extracted Resume Text (you can edit before AI uses it)",
+                            resume_text,
+                            height=260,
+                            key="resume_pdf_text",
+                        )
+                    except Exception as e:
+                        st.error(f"Failed to read PDF: {e}")
         else:
-            try:
-                with st.spinner("Analyzing job description..."):
-                    job_analysis = analyze_job(st.session_state.job_description)
-                    st.session_state.job_analysis_json = job_analysis
+            resume_text = st.text_area(
+                "Paste or type your resume here (a rough outline is enough).",
+                height=260,
+                key="resume_manual_text",
+            )
 
-                with st.spinner("Rewriting your resume for this role."):
-                    rewritten_resume = rewrite_resume(
-                        st.session_state.resume_text,
-                        st.session_state.job_analysis_json,
-                    )
-                st.session_state.final_resume_text = rewritten_resume
+        if st.button("✍️ Generate AI Resume & Cover Letter"):
+            if "job_analysis" not in st.session_state:
+                st.error("Please analyse a job description first (Step 1).")
+            elif not (resume_text or "").strip():
+                st.error("Please provide your resume text or upload a PDF.")
+            else:
+                with st.spinner("Generating resume and cover letter..."):
+                    try:
+                        analysis = st.session_state["job_analysis"]
+                        ai_resume = rewrite_resume(resume_text, analysis)
+                        ai_cover = generate_cover_letter(resume_text, analysis)
+                        ai_emails = generate_emails(analysis)
 
-                with st.spinner("Generating tailored cover letter."):
-                    cover_letter = generate_cover_letter(
-                        st.session_state.resume_text,
-                        st.session_state.job_analysis_json,
-                    )
-                st.session_state.cover_letter_text = cover_letter
+                        st.session_state["ai_resume_markdown"] = ai_resume
+                        st.session_state["ai_cover_letter"] = ai_cover
+                        st.session_state["ai_emails"] = ai_emails
 
-                with st.spinner("Creating follow-up email strategy."):
-                    emails = generate_emails(st.session_state.job_analysis_json)
-                st.session_state.follow_up_emails = emails
+                        st.success("AI resume, cover letter and emails generated.")
+                    except Exception as e:
+                        st.error(f"Failed to generate AI content: {e}")
 
-                st.success("✅ All done! Check the other tabs for your Application Kit.")
-                st.balloons()
-            except Exception as e:
-                st.error(f"❌ Error during processing: {str(e)}")
+    with tab_results:
+        st.markdown("### Step 3: Review & Download")
 
-    if st.session_state.job_analysis_json:
-        st.subheader("Job Analysis Summary")
-        analysis = st.session_state.job_analysis_json
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Role", analysis.get("role_name", "N/A"))
-        with col2:
-            st.metric("Hard Skills", len(analysis.get("hard_skills", [])))
-        with col3:
-            st.metric("Total Keywords", len(analysis.get("keywords", [])))
-        with st.expander("View Full Analysis JSON"):
-            st.json(analysis)
+        ai_resume = st.session_state.get("ai_resume_markdown")
+        ai_cover = st.session_state.get("ai_cover_letter")
+        ai_emails = st.session_state.get("ai_emails", [])
 
-with tab_resume:
-    st.header("3. Tailored Resume")
-    premium_download_section(
-        title="ATS-Optimized Resume",
-        markdown_content=st.session_state.final_resume_text or "",
-        filename_base="tailored_resume",
-        user_is_paid=user_is_paid,
-        user_id=user_id,
-    )
+        if not ai_resume and not ai_cover:
+            st.info(
+                "No AI content yet. Complete Steps 1 and 2 to generate your resume and cover letter."
+            )
+            return
 
-with tab_cover:
-    st.header("4. Custom Cover Letter")
-    premium_download_section(
-        title="Custom Cover Letter",
-        markdown_content=st.session_state.cover_letter_text or "",
-        filename_base="cover_letter",
-        user_is_paid=user_is_paid,
-        user_id=user_id,
-    )
+        if ai_resume:
+            st.markdown("## 🧾 AI-Optimised Resume (Preview)")
+            st.markdown(ai_resume)
+            premium_download_section(
+                user_id=user_id,
+                title="AI-Optimised Resume",
+                markdown_content=ai_resume,
+                paid=paid,
+                amount=1000,
+            )
 
-with tab_emails:
-    st.header("5. Follow-Up Email Strategy")
-    emails = st.session_state.follow_up_emails or []
-    if emails:
-        st.markdown("Use this **email sequence** to follow up strategically.")
-        for idx, email in enumerate(emails, start=1):
-            label = email.get("label", f"email_{idx}") if isinstance(email, dict) else f"email_{idx}"
-            subject = email.get("subject", "No subject") if isinstance(email, dict) else "No subject"
-            body = email.get("body", "") if isinstance(email, dict) else str(email)
+        if ai_cover:
+            st.markdown("## 📮 Tailored Cover Letter (Preview)")
+            st.markdown(ai_cover)
+            premium_download_section(
+                user_id=user_id,
+                title="Cover Letter",
+                markdown_content=ai_cover,
+                paid=paid,
+                amount=1000,
+            )
 
-            with st.expander(f"{idx}. {label} – {subject}"):
-                st.markdown(f"**Subject:** {subject}")
+        if ai_emails:
+            st.markdown("## ✉️ Follow-up Email Sequence")
+            for idx, email in enumerate(ai_emails, start=1):
+                st.markdown(f"### Email {idx}: {email.get('label', 'Follow-up')}")
+                st.markdown(f"**Subject:** {email.get('subject', '')}")
+                st.markdown(email.get("body", ""))
                 st.markdown("---")
-                st.text_area("Email body", value=body, height=250, key=f"email_body_{idx}")
-                st.code(body)
-    else:
-        st.info("Your follow-up email sequence will appear here after you run the analysis.")
+
+    st.markdown("---")
+    st.caption(
+        "AI Career Accelerator • Built for Kenyan graduates • This tool does not guarantee employment, "
+        "but it gives you a much stronger shot at interviews in the local job market."
+    )
+
+
+if __name__ == "__main__":
+    main()
