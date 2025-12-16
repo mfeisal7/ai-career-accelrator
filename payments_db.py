@@ -1,10 +1,4 @@
-"""
-Secure, thread-safe SQLite payment database for AI Career Accelerator.
-Used by Streamlit app to store who has paid (manually marked via admin panel),
-PLUS: persist generated AI outputs so refresh doesn't lose content,
-PLUS: user login (phone + email) mapped to a stable user_id.
-"""
-
+# payments_db.py
 import os
 import json
 import sqlite3
@@ -15,7 +9,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -50,23 +44,9 @@ def get_connection():
             conn.close()
 
 
-def _ensure_columns(conn: sqlite3.Connection) -> None:
-    cursor = conn.execute("PRAGMA table_info(payments)")
-    cols = {row["name"] for row in cursor.fetchall()}
-
-    if "created_at" not in cols:
-        conn.execute("ALTER TABLE payments ADD COLUMN created_at TEXT DEFAULT (datetime('now'))")
-    if "updated_at" not in cols:
-        conn.execute("ALTER TABLE payments ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-    if "paid_at" not in cols:
-        conn.execute("ALTER TABLE payments ADD COLUMN paid_at TEXT")
-    if "is_paid" not in cols:
-        conn.execute("ALTER TABLE payments ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 0")
-
-
 def init_db() -> None:
     with get_connection() as conn:
-        # Users table
+        # USERS (for phone+email login)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -81,7 +61,7 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
-        # Payments table
+        # PAYMENTS
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS payments (
@@ -97,8 +77,6 @@ def init_db() -> None:
             )
             """
         )
-        _ensure_columns(conn)
-
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id ON payments(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_id ON payments(invoice_id)")
         conn.execute(
@@ -106,7 +84,7 @@ def init_db() -> None:
             "ON payments(user_id, is_paid) WHERE is_paid = 1"
         )
 
-        # Outputs table
+        # OUTPUTS (persist generated content)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS user_outputs (
@@ -123,35 +101,22 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_user_outputs_updated_at ON user_outputs(updated_at)"
         )
 
-        logger.info(f"[payments_db] Initialized/migrated DB at {DB_PATH}")
 
-
-# ============================================================
+# =========================
 # Login helpers
-# ============================================================
+# =========================
 
 def normalize_phone(phone: str) -> str:
-    """
-    Normalize Kenyan phone numbers to digits only, ideally starting with 254...
-    Accepts inputs like: 0722..., +254722..., 254722..., 722...
-    """
     if not phone:
         return ""
-    p = phone.strip()
-    p = p.replace(" ", "").replace("-", "")
+    p = phone.strip().replace(" ", "").replace("-", "")
     p = re.sub(r"[^\d+]", "", p)
-
     if p.startswith("+"):
         p = p[1:]
-
-    # If starts with 0 and length looks like local Kenyan
     if p.startswith("0") and len(p) >= 10:
         p = "254" + p[1:]
-
-    # If starts with 7/1 and is 9 digits (e.g. 722xxxxxx), assume Kenya
     if (p.startswith("7") or p.startswith("1")) and len(p) == 9:
         p = "254" + p
-
     return p
 
 
@@ -160,18 +125,11 @@ def normalize_email(email: str) -> str:
 
 
 def make_user_id(phone: str, email: str) -> str:
-    """
-    Stable user_id derived from normalized phone+email (no OTP required).
-    """
     key = f"{normalize_phone(phone)}|{normalize_email(email)}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
 
 def get_or_create_user(phone: str, email: str) -> Optional[Dict[str, str]]:
-    """
-    Create or fetch a user by stable user_id (phone+email).
-    Returns: {user_id, phone, email}
-    """
     phone_n = normalize_phone(phone)
     email_n = normalize_email(email)
     if not phone_n or not email_n:
@@ -184,7 +142,6 @@ def get_or_create_user(phone: str, email: str) -> Optional[Dict[str, str]]:
             "SELECT user_id, phone, email FROM users WHERE user_id = ? LIMIT 1",
             (user_id,),
         ).fetchone()
-
         if row:
             return {"user_id": row["user_id"], "phone": row["phone"], "email": row["email"]}
 
@@ -198,69 +155,22 @@ def get_or_create_user(phone: str, email: str) -> Optional[Dict[str, str]]:
         return {"user_id": user_id, "phone": phone_n, "email": email_n}
 
 
-# ============================================================
+# =========================
 # Payments
-# ============================================================
-
-def create_payment(user_id: str, phone: str, invoice_id: str, amount: float) -> bool:
-    if not all([user_id, phone, invoice_id, amount]):
-        return False
-    try:
-        with get_connection() as conn:
-            cur = conn.execute(
-                """
-                INSERT OR IGNORE INTO payments (user_id, phone, invoice_id, amount, is_paid)
-                VALUES (?, ?, ?, ?, 0)
-                """,
-                (user_id, normalize_phone(phone), invoice_id, float(amount)),
-            )
-            return cur.rowcount > 0
-    except Exception as e:
-        logger.error(f"[payments_db] create_payment error: {e}")
-        return False
-
-
-def mark_invoice_paid(invoice_id: str) -> bool:
-    if not invoice_id:
-        return False
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    try:
-        with get_connection() as conn:
-            cur = conn.execute(
-                """
-                UPDATE payments
-                SET is_paid = 1,
-                    paid_at = ?,
-                    updated_at = datetime('now')
-                WHERE invoice_id = ? AND is_paid = 0
-                """,
-                (now, invoice_id),
-            )
-            return cur.rowcount > 0
-    except Exception as e:
-        logger.error(f"[payments_db] mark_invoice_paid error: {e}")
-        return False
-
+# =========================
 
 def is_user_paid(user_id: str) -> bool:
     if not user_id:
         return False
-    try:
-        with get_connection() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM payments WHERE user_id = ? AND is_paid = 1 LIMIT 1",
-                (user_id,),
-            ).fetchone()
-            return row is not None
-    except Exception as e:
-        logger.error(f"[payments_db] is_user_paid error: {e}")
-        return False
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM payments WHERE user_id = ? AND is_paid = 1 LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        return row is not None
 
 
 def mark_user_paid(user_id: str) -> bool:
-    """
-    Manual admin unlock: marks unpaid rows paid; if none exist, inserts a synthetic row.
-    """
     if not user_id:
         return False
     now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -274,22 +184,19 @@ def mark_user_paid(user_id: str) -> bool:
                 """,
                 (now, user_id),
             )
-            updated = cur.rowcount > 0
-
-            if not updated:
+            if cur.rowcount == 0:
                 invoice_id = f"manual-whatsapp-{user_id}-{int(datetime.utcnow().timestamp())}"
-                amount = 1000.0
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO payments
                     (user_id, phone, invoice_id, amount, is_paid, paid_at, created_at, updated_at)
                     VALUES (?, ?, ?, ?, 1, ?, datetime('now'), datetime('now'))
                     """,
-                    (user_id, "WHATSAPP", invoice_id, amount, now),
+                    (user_id, "WHATSAPP", invoice_id, 1000.0, now),
                 )
-            return True
+        return True
     except Exception as e:
-        logger.error(f"[payments_db] mark_user_paid error: {e}")
+        logger.error(f"mark_user_paid error: {e}")
         return False
 
 
@@ -302,9 +209,9 @@ def get_user_payments(user_id: Optional[str] = None, limit: int = 50) -> List[Di
         return [dict(r) for r in cur.fetchall()]
 
 
-# ============================================================
-# Persisted AI Outputs
-# ============================================================
+# =========================
+# Outputs persistence
+# =========================
 
 def save_user_output(user_id: str, resume: str, cover_letter: str, emails) -> bool:
     if not user_id:
@@ -330,7 +237,7 @@ def save_user_output(user_id: str, resume: str, cover_letter: str, emails) -> bo
             )
         return True
     except Exception as e:
-        logger.error(f"[payments_db] save_user_output error: {e}")
+        logger.error(f"save_user_output error: {e}")
         return False
 
 
@@ -345,29 +252,23 @@ def load_user_output(user_id: str) -> Optional[Dict[str, Any]]:
             ).fetchone()
             if not row:
                 return None
-
             try:
                 emails = json.loads(row["ai_emails_json"] or "[]")
             except Exception:
                 emails = []
-
             return {
                 "ai_resume_markdown": row["ai_resume_md"] or "",
                 "ai_cover_letter": row["ai_cover_letter"] or "",
                 "ai_emails": emails or [],
             }
     except Exception as e:
-        logger.error(f"[payments_db] load_user_output error: {e}")
+        logger.error(f"load_user_output error: {e}")
         return None
 
 
-# Backwards compatible aliases
+# Backwards aliases
 def get_user_payment_status(user_id: str) -> bool:
     return is_user_paid(user_id)
-
-
-def mark_user_as_paid(user_id: str) -> bool:
-    return mark_user_paid(user_id)
 
 
 init_db()
