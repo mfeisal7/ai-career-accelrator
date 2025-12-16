@@ -102,23 +102,57 @@ def _markdown_to_pdf(markdown_text: str) -> bytes:
 def _require_login():
     """
     Hard-gate the app until the user logs in with phone+email.
+    This version ALWAYS shows feedback on click (no more dead button feeling).
     """
-    if st.session_state.get("user_id") and st.session_state.get("user_phone") and st.session_state.get("user_email"):
+    # Already logged in
+    if (
+        st.session_state.get("user_id")
+        and st.session_state.get("user_phone")
+        and st.session_state.get("user_email")
+    ):
         return
 
     st.title("AI Career Accelerator – Login")
-
     st.info("Login using your **phone number** and **email** to access your saved CV, cover letter and email strategy.")
 
-    with st.form("login_form"):
-        phone = st.text_input("Phone Number (Kenya)", placeholder="e.g. 0722 123 456 or +254722123456")
-        email = st.text_input("Email", placeholder="e.g. you@gmail.com")
+    # Always-visible click feedback
+    st.session_state.setdefault("login_attempts", 0)
+
+    with st.form("login_form", clear_on_submit=False):
+        phone = st.text_input(
+            "Phone Number (Kenya)",
+            placeholder="e.g. 0722 123 456 or +254722123456",
+            key="login_phone",
+        )
+        email = st.text_input(
+            "Email",
+            placeholder="e.g. you@gmail.com",
+            key="login_email",
+        )
         submitted = st.form_submit_button("Login")
 
     if not submitted:
+        st.caption("Enter your phone and email, then click **Login**.")
         st.stop()
 
-    user = get_or_create_user(phone, email)
+    # If they clicked, we MUST show something change
+    st.session_state["login_attempts"] += 1
+    st.caption(f"Login attempt #{st.session_state['login_attempts']}")
+
+    phone = (phone or "").strip()
+    email = (email or "").strip()
+
+    if not phone or not email:
+        st.error("Please enter BOTH phone number and email.")
+        st.stop()
+
+    with st.spinner("Signing you in…"):
+        try:
+            user = get_or_create_user(phone, email)
+        except Exception as e:
+            st.error(f"Login failed (DB/user lookup error): {e}")
+            st.stop()
+
     if not user:
         st.error("Please enter a valid phone number and email.")
         st.stop()
@@ -127,10 +161,13 @@ def _require_login():
     st.session_state["user_phone"] = user["phone"]
     st.session_state["user_email"] = user["email"]
 
-    # Keep user_id in URL (useful for support/debug)
-    st.query_params.update({"user_id": user["user_id"]})
+    # Keep user_id in URL (but never break login if this fails)
+    try:
+        st.query_params.update({"user_id": user["user_id"]})
+    except Exception:
+        pass
 
-    st.success("Logged in successfully.")
+    st.success("✅ Logged in successfully.")
     st.rerun()
 
 
@@ -208,8 +245,6 @@ def main():
     st.title("AI Career Accelerator – Built for Kenyan Graduates")
     st.caption(f"Logged in as: **{phone}** • **{email}**")
     st.caption(f"User ID: `{user_id}`")
-
-    paid = get_user_payment_status(user_id)
 
     # Restore saved outputs so refresh is safe
     _hydrate_session_from_db(user_id)
