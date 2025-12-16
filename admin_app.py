@@ -3,9 +3,11 @@
 Admin panel for manually unlocking paid users.
 
 Enhancements:
-- Shows whether user has generated AI outputs saved in DB
-- Allows preview of saved outputs
-- Provides a one-click WhatsApp message copy button (includes user_id)
+- Search users by phone OR email
+- Resolve stable user_id
+- Show payment status
+- Preview saved AI outputs
+- One-click WhatsApp message copy
 """
 
 import os
@@ -16,6 +18,9 @@ from payments_db import (
     mark_user_paid,
     get_user_payments,
     load_user_output,
+    get_or_create_user,
+    normalize_phone,
+    normalize_email,
 )
 
 
@@ -24,7 +29,6 @@ from payments_db import (
 # ============================================================
 
 def _get_admin_password() -> str | None:
-    """Load ADMIN_PASSWORD from environment only."""
     pw = os.getenv("ADMIN_PASSWORD")
     return pw.strip() if pw else None
 
@@ -33,19 +37,18 @@ def _get_admin_password() -> str | None:
 # Helpers
 # ============================================================
 
-def _copy_whatsapp_message(user_id: str):
-    """
-    Render a copy-to-clipboard button for WhatsApp unlock message.
-    """
+def _copy_whatsapp_message(user_id: str, phone: str, email: str):
     message = (
-        "Hi, I’ve received payment for the AI Career Accelerator. "
-        f"My user ID is: {user_id}"
+        "Hi, I’ve received payment for the AI Career Accelerator.\n"
+        f"User ID: {user_id}\n"
+        f"Phone: {phone}\n"
+        f"Email: {email}"
     )
 
     st.text_area(
         "WhatsApp Unlock Message (copy & send)",
         message,
-        height=80,
+        height=100,
         disabled=True,
     )
 
@@ -69,9 +72,6 @@ def _copy_whatsapp_message(user_id: str):
 
 
 def _render_saved_outputs(user_id: str):
-    """
-    Show whether user has saved AI outputs and allow preview.
-    """
     saved = load_user_output(user_id)
 
     if not saved:
@@ -114,7 +114,6 @@ def run_admin_panel():
     with st.sidebar:
         st.header("Admin Login")
         entered_pw = st.text_input("Password", type="password")
-
         if entered_pw != expected_pw:
             st.warning("Enter the admin password to continue.")
             st.stop()
@@ -122,39 +121,60 @@ def run_admin_panel():
     st.success("✅ Logged in")
 
     st.markdown("---")
-    st.subheader("User Status & Manual Unlock")
+    st.subheader("Find User (Phone or Email)")
 
-    user_id = st.text_input("User ID (from user app)").strip()
+    phone = st.text_input("User Phone (optional)", placeholder="0722 123 456 or +254722123456")
+    email = st.text_input("User Email (optional)", placeholder="user@gmail.com")
 
-    col1, col2 = st.columns(2)
+    user = None
+    if st.button("🔍 Find User"):
+        phone_n = normalize_phone(phone) if phone else ""
+        email_n = normalize_email(email) if email else ""
 
-    with col1:
-        if st.button("Check Status"):
-            if not user_id:
-                st.error("Please enter a user_id")
+        if not phone_n and not email_n:
+            st.error("Enter at least a phone number or email.")
+        else:
+            user = get_or_create_user(phone_n, email_n)
+            if not user:
+                st.error("User not found or invalid input.")
             else:
-                paid = is_user_paid(user_id)
-                st.success("✅ User is PAID") if paid else st.info("🔒 User is NOT paid")
+                st.success("User found ✅")
+                st.session_state["admin_user"] = user
 
-                st.markdown("### Saved Outputs")
-                _render_saved_outputs(user_id)
+    user = st.session_state.get("admin_user")
 
-                st.markdown("### WhatsApp Message")
-                _copy_whatsapp_message(user_id)
+    if user:
+        user_id = user["user_id"]
+        phone = user["phone"]
+        email = user["email"]
 
-    with col2:
-        if st.button("Mark as Paid"):
-            if not user_id:
-                st.error("Please enter a user_id")
-            else:
+        st.markdown("---")
+        st.subheader("User Details")
+
+        st.write(f"**User ID:** `{user_id}`")
+        st.write(f"**Phone:** {phone}")
+        st.write(f"**Email:** {email}")
+
+        paid = is_user_paid(user_id)
+        st.success("✅ User is PAID") if paid else st.info("🔒 User is NOT paid")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### Saved Outputs")
+            _render_saved_outputs(user_id)
+
+        with col2:
+            st.markdown("### Actions")
+            if st.button("✅ Mark as Paid"):
                 ok = mark_user_paid(user_id)
                 if ok:
-                    st.success("✅ User marked as PAID. Tell them to refresh.")
+                    st.success("User marked as PAID. Downloads will unlock immediately.")
                 else:
                     st.error("Failed to mark user as paid.")
 
-                st.markdown("### Saved Outputs")
-                _render_saved_outputs(user_id)
+            st.markdown("### WhatsApp Message")
+            _copy_whatsapp_message(user_id, phone, email)
 
     st.markdown("---")
     st.subheader("Recent Payments / Unlocks")
