@@ -23,6 +23,13 @@ from payments_db import (
     load_user_output,
 )
 
+# Optional: auto-refresh helper (best UX). If not installed, app still works.
+try:
+    from streamlit_autorefresh import st_autorefresh  # pip install streamlit-autorefresh
+except Exception:
+    st_autorefresh = None
+
+
 st.set_page_config(
     page_title="AI Career Accelerator – Kenyan Job Market",
     page_icon="🧠",
@@ -34,18 +41,28 @@ st.set_page_config(
 # ============================================================
 
 def _get_whatsapp_number() -> str:
-    """Get the WhatsApp number from environment only.
-
-    This removes Streamlit's noisy "No secrets found" message because we do not
-    touch st.secrets anywhere. On Railway, set WHATSAPP_NUMBER as a service
-    variable. If it's missing, we fall back to the default number.
-    """
+    """Get the WhatsApp number from environment only."""
     env_num = os.getenv("WHATSAPP_NUMBER")
     if env_num:
         return env_num.strip()
 
     # Fallback (keeps existing behavior)
     return "254722285538"
+
+
+def _build_whatsapp_link(user_id: str, amount: int = 1000) -> str:
+    """
+    Build a WhatsApp link with a prefilled message including user_id.
+    """
+    whatsapp_number = _get_whatsapp_number()
+    msg = (
+        f"Hi, I have paid KES {amount} for AI Career Accelerator.\n"
+        f"User ID: {user_id}\n"
+        f"Please confirm and unlock my downloads."
+    )
+    # Encode minimal characters for wa.me
+    msg_encoded = msg.replace("\n", "%0A").replace(" ", "%20")
+    return f"https://wa.me/{whatsapp_number}?text={msg_encoded}"
 
 
 # ============================================================
@@ -74,7 +91,7 @@ def _ensure_user_id() -> str:
 
     st.session_state["user_id"] = user_id
 
-    # Optional: small JS snippet to persist user_id in a cookie (non-critical)
+    # Optional: cookie persistence (non-critical)
     st.markdown(
         f"""
         <script>
@@ -97,7 +114,7 @@ def _ensure_user_id() -> str:
 def _hydrate_session_from_db(user_id: str) -> None:
     """
     Restore generated content from DB into st.session_state.
-    This is what makes refresh safe (paid or unpaid).
+    This makes refresh safe (paid or unpaid).
     """
     saved = load_user_output(user_id)
     if not saved:
@@ -119,10 +136,7 @@ def _hydrate_session_from_db(user_id: str) -> None:
 # ============================================================
 
 def _markdown_to_docx(markdown_text: str) -> bytes:
-    """
-    Convert simple Markdown to a .docx binary using python-docx.
-    This is intentionally basic – we just split on headings and paragraphs.
-    """
+    """Convert simple Markdown to a .docx binary using python-docx."""
     doc = Document()
     lines = markdown_text.splitlines()
 
@@ -146,13 +160,10 @@ def _markdown_to_docx(markdown_text: str) -> bytes:
 
 
 def _markdown_to_pdf(markdown_text: str) -> bytes:
-    """
-    Convert simple Markdown text into a basic PDF using fpdf.
-    """
+    """Convert simple Markdown text into a basic PDF using fpdf."""
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-
     pdf.set_font("Arial", size=12)
 
     for line in markdown_text.splitlines():
@@ -180,7 +191,7 @@ def premium_download_section(
 ) -> None:
     """
     Show download options for Markdown / Word / PDF, gated by payment status.
-    If unpaid, display manual WhatsApp flow.
+    If unpaid, display manual WhatsApp flow + auto-unlock polling.
     """
     st.markdown("---")
     st.subheader(title)
@@ -188,7 +199,6 @@ def premium_download_section(
     col_md, col_docx, col_pdf = st.columns(3)
 
     if paid:
-        # User is paid → full downloads unlocked
         with col_md:
             st.markdown("### 📄 Download as Markdown")
             st.download_button(
@@ -217,46 +227,70 @@ def premium_download_section(
                 file_name=f"{title.lower().replace(' ', '_')}.pdf",
                 mime="application/pdf",
             )
+        return
 
-    else:
-        # Not paid → show manual WhatsApp payment instructions
-        with col_md:
-            st.markdown("### 🔒 Locked")
-            st.info(
-                "Downloads are locked until payment is confirmed.\n\n"
-                "You can still see the content on the page above."
-            )
+    # =======================
+    # UNPAID FLOW (manual + auto-unlock)
+    # =======================
 
-        with col_docx:
-            st.markdown("### 🔓 Premium Unlock (Manual)")
-            st.write(
-                f"To unlock all {title.lower()} downloads "
-                f"(Markdown, Word, PDF) for:"
-            )
-            st.write(f"**KES {amount:,}**")
+    # We store a flag when user says "I've paid" so we can poll for unlock
+    if "waiting_for_unlock" not in st.session_state:
+        st.session_state["waiting_for_unlock"] = False
 
-            whatsapp_number = _get_whatsapp_number()
+    with col_md:
+        st.markdown("### 🔒 Locked")
+        st.info(
+            "Downloads are locked until payment is confirmed.\n\n"
+            "You can still see the content on the page above."
+        )
 
-            whatsapp_message = (
-                "Hi, I want to unlock AI Career Accelerator downloads. "
-                f"My user_id is: {user_id}"
-            )
-            whatsapp_link = (
-                f"https://wa.me/{whatsapp_number}"
-                f"?text={whatsapp_message.replace(' ', '%20')}"
-            )
+    with col_docx:
+        st.markdown("### 🔓 Premium Unlock (Manual)")
+        st.write(
+            f"To unlock all {title.lower()} downloads (Markdown, Word, PDF):"
+        )
+        st.write(f"**KES {amount:,}**")
 
-            st.write("1. Click the button below to message me on WhatsApp.")
-            st.write("2. Pay KES 1,000 via M-Pesa manually.")
-            st.write("3. I will mark your account as paid, then refresh this page.")
+        whatsapp_link = _build_whatsapp_link(user_id=user_id, amount=amount)
 
-            st.link_button("💬 Open WhatsApp & Pay", whatsapp_link)
-            st.caption(f"Your user ID: `{user_id}`")
+        st.write("1. Pay via M-Pesa manually.")
+        st.write("2. Tap the button below to message me on WhatsApp with your User ID.")
+        st.write("3. I will confirm payment in admin. This page will unlock automatically.")
 
-        with col_pdf:
+        st.link_button("💬 Pay / Notify on WhatsApp", whatsapp_link)
+        st.caption(f"Your user ID: `{user_id}`")
+
+        # Explicit "I've paid" toggle to start polling (better UX)
+        if st.button("✅ I have paid — start unlock check", key=f"paidbtn_{title}"):
+            st.session_state["waiting_for_unlock"] = True
+
+    with col_pdf:
+        if st.session_state.get("waiting_for_unlock"):
+            st.markdown("### ⏳ Waiting for admin confirmation…")
+
+            # Auto-refresh polling every 4 seconds (best UX)
+            if st_autorefresh is not None:
+                st_autorefresh(interval=4000, key=f"unlockpoll_{user_id}_{title}")
+
+            # Re-check payment status on each run
+            paid_now = get_user_payment_status(user_id)
+            if paid_now:
+                st.success("✅ Payment confirmed! Downloads are now unlocked.")
+                # Stop polling and force rerun so paid downloads render instantly
+                st.session_state["waiting_for_unlock"] = False
+                st.rerun()
+            else:
+                st.info("Not confirmed yet. If you already messaged on WhatsApp, please wait a moment…")
+
+                if st_autorefresh is None:
+                    st.warning(
+                        "Auto-unlock helper not installed. If unlock doesn't appear, refresh once.\n\n"
+                        "Fix: add `streamlit-autorefresh` to requirements.txt."
+                    )
+        else:
             st.info(
                 "After payment is confirmed in the admin dashboard, "
-                "refresh this page to unlock your downloads."
+                "click 'I have paid' above to auto-unlock (or refresh)."
             )
 
 
@@ -275,7 +309,7 @@ def main():
     # Payment status
     paid = get_user_payment_status(user_id)
 
-    # NEW: Hydrate any previously generated content so refresh never loses it
+    # Hydrate any previously generated content so refresh never loses it
     _hydrate_session_from_db(user_id)
 
     st.markdown(
@@ -367,7 +401,7 @@ def main():
                         st.session_state["ai_cover_letter"] = ai_cover
                         st.session_state["ai_emails"] = ai_emails
 
-                        # NEW: Persist outputs immediately so refresh is safe
+                        # Persist outputs immediately so refresh is safe
                         save_user_output(
                             user_id=user_id,
                             resume=ai_resume,
@@ -391,6 +425,9 @@ def main():
                 "No AI content yet. Complete Steps 1 and 2 to generate your resume and cover letter."
             )
             return
+
+        # Re-check paid status each time results tab renders (helps unlock feel)
+        paid = get_user_payment_status(user_id)
 
         if ai_resume:
             st.markdown("## 🧾 AI-Optimised Resume (Preview)")
