@@ -1,8 +1,8 @@
 # ── Core app ──
-streamlit==1.40.0
+streamlit>=1.40.0
 streamlit-autorefresh
 
-# ── AI / LLM ──
+# ── AI / LLM (optional — app works without this) ──
 google-generativeai>=0.8.0
 tenacity==8.5.0
 
