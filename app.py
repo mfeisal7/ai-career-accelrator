@@ -881,45 +881,52 @@ def main():
 
         col_s, col_p, col_e = st.columns(3)
 
-        for col, tier_key, highlight in [(col_s, "starter", False), (col_p, "pro", True), (col_e, "executive", False)]:
-            tier = TIERS[tier_key]
-            border = "2px solid #10b981" if highlight else "1px solid #334155"
-            badge_html = "<div style='background:#10b981; color:#0f172a; border-radius:20px; padding:2px 12px; font-size:12px; font-weight:700; margin-bottom:8px; display:inline-block;'>🔥 Most Popular</div>" if highlight else ""
-            features_html = "".join(f"<div style='text-align:left; padding:4px 0; font-size:13px; color:#cbd5e1;'>✅ {f}</div>" for f in tier["features"])
-            with col:
-                st.markdown(f"""
-                <div style='background:#1e293b; border:{border}; border-radius:16px; padding:24px; text-align:center;'>
-                    {badge_html}
-                    <h3 style='margin:8px 0 4px 0; color:#f1f5f9;'>{tier["name"]}</h3>
-                    <div style='font-size:32px; font-weight:800; color:#10b981; margin:8px 0;'>KSh {tier["price_ksh"]:,}</div>
-                    <div style='color:#64748b; font-size:12px; margin-bottom:16px;'>One-time • Lifetime access</div>
-                    {features_html}
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-                wa_link = _whatsapp_pay_link(user_id, user_phone, user_email, tier_key)
-                st.link_button(
-                    f"💬 Get {tier['name']} — KSh {tier['price_ksh']:,}",
-                    wa_link,
-                    use_container_width=True,
-                )
+        # ── STARTER ──
+        with col_s:
+            st.markdown("### Starter")
+            st.markdown("## KSh 1,999")
+            st.caption("One-time • Lifetime access")
+            st.divider()
+            for f in TIERS["starter"]["features"]:
+                st.markdown(f"✅ {f}")
+            st.divider()
+            wa_link = _whatsapp_pay_link(user_id, user_phone, user_email, "starter")
+            st.link_button("💬 Get Starter — KSh 1,999", wa_link, use_container_width=True)
 
-        st.markdown("---")
-        st.markdown("""
-        <div style='background:#1e293b; border-radius:12px; padding:20px; text-align:center;'>
-            <h4 style='color:#10b981; margin:0 0 8px 0;'>🛡️ 45-Day Interview Guarantee</h4>
-            <p style='color:#94a3b8; margin:0;'>Follow the system, apply to agreed roles, and if you don't get 3 interviews in 45 days — we refund you. No drama.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── PRO (most popular) ──
+        with col_p:
+            st.markdown("### 🔥 Pro — *Most Popular*")
+            st.markdown("## KSh 3,999")
+            st.caption("One-time • Lifetime access")
+            st.divider()
+            for f in TIERS["pro"]["features"]:
+                st.markdown(f"✅ {f}")
+            st.divider()
+            wa_link = _whatsapp_pay_link(user_id, user_phone, user_email, "pro")
+            st.link_button("💬 Get Pro — KSh 3,999", wa_link, use_container_width=True, type="primary")
 
-        st.markdown("")
+        # ── EXECUTIVE ──
+        with col_e:
+            st.markdown("### Executive")
+            st.markdown("## KSh 7,999")
+            st.caption("One-time • Lifetime access")
+            st.divider()
+            for f in TIERS["executive"]["features"]:
+                st.markdown(f"✅ {f}")
+            st.divider()
+            wa_link = _whatsapp_pay_link(user_id, user_phone, user_email, "executive")
+            st.link_button("💬 Get Executive — KSh 7,999", wa_link, use_container_width=True)
+
+        st.divider()
+        st.info("🛡️ **45-Day Interview Guarantee** — Follow the system, apply to agreed roles, and if you don't get 3 interviews in 45 days we refund you. No drama.")
+
         st.markdown("**How payment works:**")
         st.markdown(
             "1. Click the WhatsApp button for your plan\n"
             "2. We send you M-Pesa payment instructions\n"
             "3. Pay via M-Pesa (30 seconds)\n"
             "4. We confirm and unlock your plan (within 15 min, often faster)\n"
-            "5. Return here, click 'refresh my access' and all features unlock"
+            "5. Return here and all features unlock automatically"
         )
 
 
