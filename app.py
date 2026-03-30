@@ -518,13 +518,182 @@ def main():
             st.warning("⬆️ Analyse a job in Tab 1 first.")
         else:
             mode = st.radio(
-                "How to provide your CV?",
-                ["📄 Upload PDF", "✏️ Type / Paste text"],
+                "How to provide your background?",
+                ["📝 Fill in Profile Form", "📄 Upload PDF", "✏️ Paste Text"],
                 horizontal=True,
+                help="The Profile Form gives the best results — each section is clearly structured.",
             )
 
             resume_text = ""
-            if mode == "📄 Upload PDF":
+
+            # ── STRUCTURED PROFILE FORM ──
+            if mode == "📝 Fill in Profile Form":
+                st.info("Fill in each section below. The more detail you add, the stronger your CV will be.")
+
+                with st.form("profile_builder_form", clear_on_submit=False):
+                    st.markdown("#### 👤 Personal Details")
+                    col_n, col_p2, col_e2 = st.columns(3)
+                    with col_n:
+                        p_name = st.text_input("Full name*", placeholder="Jane Wanjiku")
+                    with col_p2:
+                        p_phone = st.text_input("Phone*", placeholder="0712 345 678")
+                    with col_e2:
+                        p_email = st.text_input("Email*", placeholder="jane@gmail.com")
+                    col_loc, col_li = st.columns(2)
+                    with col_loc:
+                        p_location = st.text_input("Location", placeholder="Nairobi, Kenya")
+                    with col_li:
+                        p_linkedin = st.text_input("LinkedIn URL (optional)", placeholder="linkedin.com/in/janewanjiku")
+
+                    st.markdown("---")
+                    st.markdown("#### 🎓 Education")
+                    st.caption("Add your highest qualifications. Use one entry per line.")
+
+                    edu_entries = []
+                    for i in range(1, 4):
+                        with st.expander(f"Qualification {i}" + (" (required)" if i == 1 else " (optional)"), expanded=(i == 1)):
+                            col_d, col_i, col_y = st.columns([2, 2, 1])
+                            with col_d:
+                                degree = st.text_input(f"Degree/Diploma", placeholder="BSc Computer Science", key=f"edu_degree_{i}")
+                            with col_i:
+                                institution = st.text_input(f"Institution", placeholder="University of Nairobi", key=f"edu_inst_{i}")
+                            with col_y:
+                                year = st.text_input(f"Year", placeholder="2020", key=f"edu_year_{i}")
+                            honours = st.text_input(f"Grade/Honours (optional)", placeholder="Second Class Upper / GPA 3.5", key=f"edu_grade_{i}")
+                            if degree and institution:
+                                edu_entries.append({"degree": degree, "institution": institution, "year": year, "honours": honours})
+
+                    st.markdown("---")
+                    st.markdown("#### 💼 Work Experience")
+                    st.caption("Most recent first. Use bullet points in the Responsibilities field — start each with a dash (-) or new line.")
+
+                    work_entries = []
+                    for i in range(1, 5):
+                        with st.expander(f"Job {i}" + (" (required)" if i == 1 else " (optional)"), expanded=(i == 1)):
+                            col_r, col_c2 = st.columns([2, 2])
+                            with col_r:
+                                role = st.text_input("Job Title", placeholder="Data Analyst", key=f"work_role_{i}")
+                            with col_c2:
+                                company = st.text_input("Company / Organisation", placeholder="Equity Bank", key=f"work_company_{i}")
+                            col_s, col_e_w = st.columns(2)
+                            with col_s:
+                                start = st.text_input("Start date", placeholder="Jan 2021", key=f"work_start_{i}")
+                            with col_e_w:
+                                end = st.text_input("End date", placeholder="Present", key=f"work_end_{i}")
+                            responsibilities = st.text_area(
+                                "Key responsibilities & achievements (one per line)",
+                                height=120,
+                                placeholder="- Analysed financial data and produced monthly reports for senior management\n- Reduced report production time by 30% by automating Excel models\n- Managed a team of 3 junior analysts",
+                                key=f"work_resp_{i}",
+                            )
+                            if role and company:
+                                work_entries.append({
+                                    "role": role, "company": company,
+                                    "start": start, "end": end,
+                                    "responsibilities": responsibilities,
+                                })
+
+                    st.markdown("---")
+                    st.markdown("#### 🛠️ Skills & Qualifications")
+                    col_sk1, col_sk2 = st.columns(2)
+                    with col_sk1:
+                        p_skills = st.text_area(
+                            "Technical skills (comma-separated)",
+                            height=80,
+                            placeholder="Python, Excel, SQL, Power BI, QuickBooks, SPSS",
+                        )
+                    with col_sk2:
+                        p_soft = st.text_area(
+                            "Soft skills (comma-separated)",
+                            height=80,
+                            placeholder="Team leadership, Communication, Problem solving, Project management",
+                        )
+
+                    p_certs = st.text_area(
+                        "Certifications & Professional memberships (one per line, optional)",
+                        height=70,
+                        placeholder="CPA Part II — KASNEB\nGoogle Data Analytics Certificate — Coursera, 2023\nICSK Member",
+                    )
+
+                    p_extra = st.text_area(
+                        "Volunteer work, Projects, Awards (optional)",
+                        height=70,
+                        placeholder="Volunteer data trainer — Nairobi Tech Week, 2023\nBest Accounting Student Award — JKUAT, 2020",
+                    )
+
+                    build_submitted = st.form_submit_button("🔨 Build Structured Profile", use_container_width=True)
+
+                if build_submitted:
+                    if not p_name.strip() or not edu_entries or not work_entries:
+                        st.error("Please fill in at least: your name, one education entry, and one work experience entry.")
+                    else:
+                        # Assemble clean structured text for the template engine
+                        lines = []
+                        lines.append(p_name.strip())
+                        contact_parts = [p for p in [p_phone.strip(), p_email.strip(), p_location.strip()] if p]
+                        lines.append(" | ".join(contact_parts))
+                        if p_linkedin.strip():
+                            lines.append(p_linkedin.strip())
+                        lines.append("")
+
+                        lines.append("Education:")
+                        for edu in edu_entries:
+                            entry_line = f"{edu['degree']} - {edu['institution']}"
+                            if edu.get("year"):
+                                entry_line += f" - {edu['year']}"
+                            if edu.get("honours"):
+                                entry_line += f" ({edu['honours']})"
+                            lines.append(entry_line)
+                        lines.append("")
+
+                        lines.append("Work Experience:")
+                        for job in work_entries:
+                            date_range = f"{job['start']}" + (f" to {job['end']}" if job.get("end") else "")
+                            lines.append(f"{job['role']} - {job['company']} - {date_range}")
+                            if job.get("responsibilities"):
+                                for resp_line in job["responsibilities"].splitlines():
+                                    resp_line = resp_line.strip().lstrip("-• ").strip()
+                                    if resp_line:
+                                        lines.append(f"- {resp_line}")
+                            lines.append("")
+
+                        all_skills = []
+                        if p_skills.strip():
+                            all_skills.extend([s.strip() for s in p_skills.split(",") if s.strip()])
+                        if p_soft.strip():
+                            all_skills.extend([s.strip() for s in p_soft.split(",") if s.strip()])
+                        if all_skills:
+                            lines.append("Skills:")
+                            lines.append(", ".join(all_skills))
+                            lines.append("")
+
+                        if p_certs.strip():
+                            lines.append("Certifications:")
+                            for cert_line in p_certs.splitlines():
+                                if cert_line.strip():
+                                    lines.append(cert_line.strip())
+                            lines.append("")
+
+                        if p_extra.strip():
+                            lines.append("Volunteer & Achievements:")
+                            for extra_line in p_extra.splitlines():
+                                if extra_line.strip():
+                                    lines.append(extra_line.strip())
+                            lines.append("")
+
+                        resume_text = "\n".join(lines)
+                        st.session_state["profile_form_text"] = resume_text
+                        st.success("✅ Profile built! Ready to generate your job kit.")
+
+                # Use saved profile form text if available
+                if not resume_text:
+                    resume_text = st.session_state.get("profile_form_text", "")
+
+                if resume_text:
+                    with st.expander("📋 Preview your structured profile", expanded=False):
+                        st.text(resume_text)
+
+            elif mode == "📄 Upload PDF":
                 f = st.file_uploader("Upload current CV (PDF)", type=["pdf"])
                 if f is not None:
                     with st.spinner("Extracting text…"):
