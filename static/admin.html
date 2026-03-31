@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin — AI Career Accelerator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  *{font-family:system-ui,-apple-system,sans-serif;box-sizing:border-box}
+  body{background:#0f172a;color:#f1f5f9;min-height:100vh}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px}
+  .input{background:#0f172a;border:1px solid #334155;color:#f1f5f9;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;transition:border-color .15s;width:100%}
+  .input:focus{border-color:#10b981}
+  .btn-primary{background:#10b981;color:#0f172a;font-weight:700;border:none;cursor:pointer;border-radius:8px;padding:8px 16px;font-size:13px;transition:background .15s}
+  .btn-primary:hover{background:#34d399}
+  .btn-outline{background:transparent;color:#94a3b8;border:1px solid #334155;cursor:pointer;border-radius:8px;padding:8px 16px;font-size:13px;transition:border-color .15s,color .15s}
+  .btn-outline:hover{border-color:#10b981;color:#10b981}
+  .btn-red{background:#7f1d1d;color:#fca5a5;border:none;cursor:pointer;border-radius:8px;padding:8px 16px;font-size:13px;transition:background .15s}
+  .btn-red:hover{background:#991b1b}
+  .badge{display:inline-block;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600}
+  .badge-green{background:#052e16;color:#10b981;border:1px solid #10b981}
+  .badge-blue{background:#0c1a3a;color:#60a5fa;border:1px solid #3b82f6}
+  .badge-purple{background:#1e0a3c;color:#c084fc;border:1px solid #a855f7}
+  .badge-gray{background:#1e293b;color:#64748b;border:1px solid #334155}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;padding:8px 10px;color:#64748b;font-weight:600;border-bottom:1px solid #334155;white-space:nowrap}
+  td{padding:8px 10px;border-bottom:1px solid #1e293b;color:#cbd5e1;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .hidden{display:none!important}
+  .spinner{width:16px;height:16px;border:2px solid #334155;border-top-color:#10b981;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .nav-tab{padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#64748b;transition:background .15s,color .15s}
+  .nav-tab.active{background:#10b981;color:#0f172a}
+  #toast{position:fixed;bottom:24px;right:24px;background:#10b981;color:#0f172a;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;transform:translateY(80px);transition:transform .3s;z-index:100}
+  #toast.show{transform:translateY(0)}
+</style>
+</head>
+<body>
+
+<div id="toast">✅ Done</div>
+
+<!-- Login gate -->
+<div id="login-gate" class="min-h-screen flex items-center justify-center px-4">
+  <div class="card w-full max-w-xs">
+    <div class="text-center mb-4">
+      <div class="text-2xl mb-1">🔐</div>
+      <div class="font-bold text-base">Admin Panel</div>
+      <div class="text-xs text-slate-400">AI Career Accelerator Kenya</div>
+    </div>
+    <input id="pw-input" type="password" class="input mb-3" placeholder="Admin password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <div id="login-err" class="text-xs text-red-400 mb-2 hidden"></div>
+    <button onclick="doLogin()" class="btn-primary w-full">Enter Admin →</button>
+  </div>
+</div>
+
+<!-- Main admin -->
+<div id="admin-main" class="hidden">
+
+  <header class="border-b border-slate-800 bg-slate-950/90 sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-bold text-emerald-400">🔐 Admin</div>
+        <div class="flex gap-1">
+          <button class="nav-tab active" onclick="showTab('dashboard')" id="tab-dashboard">Dashboard</button>
+          <button class="nav-tab" onclick="showTab('users')" id="tab-users">Users</button>
+          <button class="nav-tab" onclick="showTab('leads')" id="tab-leads">Leads</button>
+          <button class="nav-tab" onclick="showTab('payments')" id="tab-payments">Payments</button>
+        </div>
+      </div>
+      <button onclick="doLogout()" class="text-xs text-slate-500 hover:text-red-400 transition-colors">Sign out</button>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+
+    <!-- DASHBOARD TAB -->
+    <div id="tab-content-dashboard">
+      <h2 class="text-lg font-bold mb-4">Revenue Dashboard</h2>
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-4 mb-6">
+        <div class="card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mb-1">Total Users</div>
+          <div id="stat-users" class="text-3xl font-black text-slate-100">—</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mb-1">Paid Customers</div>
+          <div id="stat-paid" class="text-3xl font-black text-emerald-400">—</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mb-1">Total Revenue</div>
+          <div id="stat-revenue" class="text-3xl font-black text-amber-400">—</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wide mb-1">Leads</div>
+          <div id="stat-leads" class="text-3xl font-black text-blue-400">—</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-3 mb-6">
+        <div class="card text-center">
+          <div class="text-xs text-blue-400 uppercase tracking-wide mb-1">Starter</div>
+          <div id="tier-starter" class="text-2xl font-black">—</div>
+          <div id="rev-starter" class="text-xs text-slate-500 mt-1">KSh —</div>
+        </div>
+        <div class="card text-center border-emerald-500/30">
+          <div class="text-xs text-emerald-400 uppercase tracking-wide mb-1">Pro 🔥</div>
+          <div id="tier-pro" class="text-2xl font-black text-emerald-400">—</div>
+          <div id="rev-pro" class="text-xs text-slate-500 mt-1">KSh —</div>
+        </div>
+        <div class="card text-center">
+          <div class="text-xs text-purple-400 uppercase tracking-wide mb-1">Executive</div>
+          <div id="tier-executive" class="text-2xl font-black text-purple-400">—</div>
+          <div id="rev-executive" class="text-xs text-slate-500 mt-1">KSh —</div>
+        </div>
+      </div>
+      <div class="text-right">
+        <button onclick="loadStats()" class="btn-outline text-xs">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- USERS TAB -->
+    <div id="tab-content-users" class="hidden">
+      <h2 class="text-lg font-bold mb-4">Find & Manage User</h2>
+      <div class="card mb-4">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
+          <div>
+            <label class="text-xs text-slate-400 mb-1 block">Phone</label>
+            <input id="search-phone" class="input" placeholder="0722 123 456 or +254..."/>
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 mb-1 block">Email</label>
+            <input id="search-email" class="input" placeholder="user@gmail.com"/>
+          </div>
+        </div>
+        <button onclick="findUser()" class="btn-primary">🔍 Find User</button>
+        <div id="search-err" class="text-xs text-red-400 mt-2 hidden"></div>
+      </div>
+
+      <div id="user-result" class="hidden">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div class="card">
+            <div class="font-bold text-sm mb-3">User Details</div>
+            <div class="space-y-2 text-sm">
+              <div><span class="text-slate-400">ID:</span> <span id="u-id" class="font-mono text-xs text-slate-300"></span></div>
+              <div><span class="text-slate-400">Phone:</span> <span id="u-phone"></span></div>
+              <div><span class="text-slate-400">Email:</span> <span id="u-email"></span></div>
+              <div><span class="text-slate-400">Plan:</span> <span id="u-tier-badge"></span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="font-bold text-sm mb-3">Grant Plan Access</div>
+            <div class="text-xs text-slate-400 mb-2">Use this after confirming M-Pesa payment.</div>
+            <select id="grant-tier" class="input mb-3">
+              <option value="starter">Starter — KSh 1,999</option>
+              <option value="pro" selected>Pro — KSh 3,999</option>
+              <option value="executive">Executive — KSh 7,999</option>
+            </select>
+            <button onclick="grantAccess()" class="btn-primary w-full mb-2">✅ Grant Access</button>
+            <div id="grant-result" class="hidden"></div>
+          </div>
+        </div>
+
+        <!-- WhatsApp confirmation message -->
+        <div class="card mt-4">
+          <div class="font-bold text-sm mb-2">WhatsApp Confirmation Message</div>
+          <textarea id="wa-msg" class="input" rows="4" readonly></textarea>
+          <button onclick="openWhatsApp()" class="btn-outline mt-2 text-xs">💬 Open WhatsApp</button>
+        </div>
+
+        <!-- Payment history -->
+        <div id="user-payments-section" class="card mt-4">
+          <div class="font-bold text-sm mb-3">Payment History</div>
+          <div id="user-payments-table"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADS TAB -->
+    <div id="tab-content-leads" class="hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Email Leads</h2>
+        <div class="flex gap-2">
+          <button onclick="loadLeads()" class="btn-outline text-xs">↻ Refresh</button>
+          <button onclick="exportLeadsCSV()" class="btn-primary text-xs">⬇ Export CSV</button>
+        </div>
+      </div>
+      <div class="card overflow-x-auto">
+        <div id="leads-table">
+          <div class="text-slate-400 text-sm">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAYMENTS TAB -->
+    <div id="tab-content-payments" class="hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">All Payments</h2>
+        <button onclick="loadPayments()" class="btn-outline text-xs">↻ Refresh</button>
+      </div>
+      <div class="card overflow-x-auto">
+        <div id="payments-table">
+          <div class="text-slate-400 text-sm">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+const API = '';
+let adminPw = '';
+let foundUser = null;
+let leadsData = [];
+
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = (isErr ? '❌ ' : '✅ ') + msg;
+  t.style.background = isErr ? '#7f1d1d' : '#10b981';
+  t.style.color = isErr ? '#fca5a5' : '#0f172a';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+async function adminApi(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(json.detail || `Error ${r.status}`);
+  return json;
+}
+
+async function doLogin() {
+  const pw = document.getElementById('pw-input').value.trim();
+  if (!pw) return;
+  try {
+    await adminApi('GET', '/api/admin/stats');
+    adminPw = pw;
+    document.getElementById('login-gate').classList.add('hidden');
+    document.getElementById('admin-main').classList.remove('hidden');
+    loadStats();
+  } catch (e) {
+    document.getElementById('login-err').textContent = 'Wrong password or server error.';
+    document.getElementById('login-err').classList.remove('hidden');
+  }
+}
+document.getElementById('pw-input').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+function doLogout() {
+  adminPw = '';
+  document.getElementById('admin-main').classList.add('hidden');
+  document.getElementById('login-gate').classList.remove('hidden');
+}
+
+function showTab(tab) {
+  ['dashboard','users','leads','payments'].forEach(t => {
+    document.getElementById('tab-content-' + t).classList.add('hidden');
+    document.getElementById('tab-' + t).classList.remove('active');
+  });
+  document.getElementById('tab-content-' + tab).classList.remove('hidden');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'leads') loadLeads();
+  if (tab === 'payments') loadPayments();
+}
+
+async function loadStats() {
+  try {
+    const s = await adminApi('GET', '/api/admin/stats');
+    document.getElementById('stat-users').textContent = s.total_users ?? '—';
+    document.getElementById('stat-paid').textContent = s.total_paid ?? '—';
+    document.getElementById('stat-revenue').textContent = 'KSh ' + ((s.total_revenue_ksh || 0)).toLocaleString();
+    document.getElementById('stat-leads').textContent = s.total_leads ?? '—';
+    const tc = s.tier_counts || {};
+    const prices = { starter: 1999, pro: 3999, executive: 7999 };
+    ['starter','pro','executive'].forEach(t => {
+      const count = tc[t] || 0;
+      document.getElementById('tier-' + t).textContent = count;
+      document.getElementById('rev-' + t).textContent = 'KSh ' + (count * prices[t]).toLocaleString();
+    });
+  } catch (e) {
+    toast('Failed to load stats: ' + e.message, true);
+  }
+}
+
+async function findUser() {
+  const phone = document.getElementById('search-phone').value.trim();
+  const email = document.getElementById('search-email').value.trim();
+  const errEl = document.getElementById('search-err');
+  if (!phone && !email) {
+    errEl.textContent = 'Enter phone and email.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  errEl.classList.add('hidden');
+  try {
+    const u = await adminApi('POST', '/api/admin/user', { phone: phone || '0', email: email || 'x@x' });
+    foundUser = u;
+    document.getElementById('user-result').classList.remove('hidden');
+    document.getElementById('u-id').textContent = u.user_id;
+    document.getElementById('u-phone').textContent = u.phone;
+    document.getElementById('u-email').textContent = u.email;
+
+    const tier = u.tier || 'none';
+    const tierColors = { none: 'badge-gray', starter: 'badge-blue', pro: 'badge-green', executive: 'badge-purple' };
+    document.getElementById('u-tier-badge').innerHTML = `<span class="badge ${tierColors[tier]||'badge-gray'}">${tier.toUpperCase()}</span>`;
+
+    // Payment history
+    const pt = document.getElementById('user-payments-table');
+    if (u.payments && u.payments.length) {
+      pt.innerHTML = buildTable(u.payments, ['tier','amount','is_paid','paid_at','created_at']);
+    } else {
+      pt.innerHTML = '<div class="text-slate-400 text-xs">No payment records yet.</div>';
+    }
+
+    updateWaMsg();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function grantAccess() {
+  if (!foundUser) return;
+  const tier = document.getElementById('grant-tier').value;
+  const resultEl = document.getElementById('grant-result');
+  try {
+    await adminApi('POST', '/api/admin/grant', { user_id: foundUser.user_id, tier });
+    foundUser.tier = tier;
+    toast(`${foundUser.phone} unlocked for ${tier.toUpperCase()}`);
+    resultEl.innerHTML = `<div class="text-emerald-400 text-xs mt-1">✅ ${tier.toUpperCase()} granted</div>`;
+    resultEl.classList.remove('hidden');
+    updateWaMsg();
+    const tierColors = { none:'badge-gray', starter:'badge-blue', pro:'badge-green', executive:'badge-purple' };
+    document.getElementById('u-tier-badge').innerHTML = `<span class="badge ${tierColors[tier]||'badge-gray'}">${tier.toUpperCase()}</span>`;
+  } catch (e) {
+    toast('Grant failed: ' + e.message, true);
+  }
+}
+
+function updateWaMsg() {
+  if (!foundUser) return;
+  const tier = document.getElementById('grant-tier').value;
+  const phone = foundUser.phone;
+  const msg = `Hi! ✅ Your AI Career Accelerator ${tier.charAt(0).toUpperCase()+tier.slice(1)} plan has been unlocked.\n\nGo to https://aicareerke.streamlit.app, log in with your phone (${phone}) and email, then click "refresh my access". All ${tier} features are now active.\n\nAny issues? Reply here.`;
+  document.getElementById('wa-msg').value = msg;
+}
+
+function openWhatsApp() {
+  if (!foundUser) return;
+  const msg = document.getElementById('wa-msg').value;
+  const enc = msg.replace(/\n/g,'%0A').replace(/ /g,'%20');
+  window.open(`https://wa.me/${foundUser.phone}?text=${enc}`, '_blank');
+}
+
+async function loadLeads() {
+  const el = document.getElementById('leads-table');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    leadsData = await adminApi('GET', '/api/admin/leads');
+    if (!leadsData.length) { el.innerHTML = '<div class="text-slate-400 text-sm">No leads yet.</div>'; return; }
+    el.innerHTML = buildTable(leadsData, ['id','phone','email','source','created_at']);
+  } catch (e) {
+    el.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`;
+  }
+}
+
+async function loadPayments() {
+  const el = document.getElementById('payments-table');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const data = await adminApi('GET', '/api/admin/payments');
+    if (!data.length) { el.innerHTML = '<div class="text-slate-400 text-sm">No payments yet.</div>'; return; }
+    el.innerHTML = buildTable(data, ['id','phone','tier','amount','is_paid','paid_at','created_at']);
+  } catch (e) {
+    el.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`;
+  }
+}
+
+function buildTable(rows, cols) {
+  if (!rows || !rows.length) return '<div class="text-slate-400 text-sm">No records.</div>';
+  let html = '<table><thead><tr>';
+  cols.forEach(c => { html += `<th>${c}</th>`; });
+  html += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    html += '<tr>';
+    cols.forEach(c => {
+      let val = row[c] ?? '—';
+      if (c === 'is_paid') val = val ? '<span class="badge badge-green">PAID</span>' : '<span class="badge badge-gray">UNPAID</span>';
+      if (c === 'tier') {
+        const colors = { starter:'badge-blue', pro:'badge-green', executive:'badge-purple', none:'badge-gray' };
+        val = `<span class="badge ${colors[val]||'badge-gray'}">${String(val).toUpperCase()}</span>`;
+      }
+      if (c === 'amount' && val !== '—') val = 'KSh ' + Number(val).toLocaleString();
+      if ((c === 'created_at' || c === 'paid_at') && val && val !== '—') val = val.replace('T',' ').split('.')[0];
+      html += `<td>${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function exportLeadsCSV() {
+  if (!leadsData.length) { toast('Load leads first', true); return; }
+  const cols = ['id','phone','email','source','created_at'];
+  let csv = cols.join(',') + '\n';
+  leadsData.forEach(row => {
+    csv += cols.map(c => `"${(row[c]||'').toString().replace(/"/g,'""')}"`).join(',') + '\n';
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'leads_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

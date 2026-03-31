@@ -1,6 +1,7 @@
-# ── Core app ──
-streamlit>=1.40.0
-streamlit-autorefresh
+# ── Web framework ──
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
 
 # ── AI / LLM (optional — app works without this) ──
 google-generativeai>=0.8.0

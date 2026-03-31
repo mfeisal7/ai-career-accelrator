@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: ai-career-accelerator
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: INTASEND_API_KEY
+        sync: false
+      - key: INTASEND_PUBLIC_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PAYMENTS_DB_PATH
+        value: /var/data/payments.db
+    disk:
+      name: payments-db
+      mountPath: /var/data
+      sizeGB: 1
