@@ -207,6 +207,7 @@
 
 <script>
 const API = '';
+const APP_URL = window.location.origin;
 let adminPw = '';
 let foundUser = null;
 let leadsData = [];
@@ -235,13 +236,14 @@ async function adminApi(method, path, body) {
 async function doLogin() {
   const pw = document.getElementById('pw-input').value.trim();
   if (!pw) return;
+  adminPw = pw;  // set BEFORE the call so the header is sent
   try {
     await adminApi('GET', '/api/admin/stats');
-    adminPw = pw;
     document.getElementById('login-gate').classList.add('hidden');
     document.getElementById('admin-main').classList.remove('hidden');
     loadStats();
   } catch (e) {
+    adminPw = '';  // reset on failure so it doesn't persist
     document.getElementById('login-err').textContent = 'Wrong password or server error.';
     document.getElementById('login-err').classList.remove('hidden');
   }
@@ -288,14 +290,14 @@ async function findUser() {
   const phone = document.getElementById('search-phone').value.trim();
   const email = document.getElementById('search-email').value.trim();
   const errEl = document.getElementById('search-err');
-  if (!phone && !email) {
-    errEl.textContent = 'Enter phone and email.';
+  if (!phone || !email) {
+    errEl.textContent = 'Enter both the phone number and email to look up a user.';
     errEl.classList.remove('hidden');
     return;
   }
   errEl.classList.add('hidden');
   try {
-    const u = await adminApi('POST', '/api/admin/user', { phone: phone || '0', email: email || 'x@x' });
+    const u = await adminApi('POST', '/api/admin/user', { phone, email });
     foundUser = u;
     document.getElementById('user-result').classList.remove('hidden');
     document.getElementById('u-id').textContent = u.user_id;
@@ -343,15 +345,14 @@ function updateWaMsg() {
   if (!foundUser) return;
   const tier = document.getElementById('grant-tier').value;
   const phone = foundUser.phone;
-  const msg = `Hi! ✅ Your AI Career Accelerator ${tier.charAt(0).toUpperCase()+tier.slice(1)} plan has been unlocked.\n\nGo to https://aicareerke.streamlit.app, log in with your phone (${phone}) and email, then click "refresh my access". All ${tier} features are now active.\n\nAny issues? Reply here.`;
+  const msg = `Hi! ✅ Your AI Career Accelerator ${tier.charAt(0).toUpperCase()+tier.slice(1)} plan has been unlocked.\n\nGo to ${APP_URL}, log in with your phone (${phone}) and email, then tap "I've already paid — refresh my access". All ${tier} features are now active.\n\nAny issues? Reply here.`;
   document.getElementById('wa-msg').value = msg;
 }
 
 function openWhatsApp() {
   if (!foundUser) return;
   const msg = document.getElementById('wa-msg').value;
-  const enc = msg.replace(/\n/g,'%0A').replace(/ /g,'%20');
-  window.open(`https://wa.me/${foundUser.phone}?text=${enc}`, '_blank');
+  window.open(`https://wa.me/${foundUser.phone}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
 async function loadLeads() {

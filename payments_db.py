@@ -62,8 +62,6 @@ def init_db() -> None:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 
         # PAYMENTS (now with tier column)
         conn.execute("""
@@ -183,6 +181,26 @@ def get_or_create_user(phone: str, email: str) -> Optional[Dict[str, str]]:
             (user_id, phone_n, email_n),
         )
         return {"user_id": user_id, "phone": phone_n, "email": email_n}
+
+
+def find_user(phone: str, email: str) -> Optional[Dict[str, str]]:
+    """
+    Look up an existing user by phone+email — NEVER creates a new record.
+    Returns None if no match found.
+    """
+    phone_n = normalize_phone(phone)
+    email_n = normalize_email(email)
+    if not phone_n or not email_n:
+        return None
+    user_id = make_user_id(phone_n, email_n)
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT user_id, phone, email FROM users WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"user_id": row["user_id"], "phone": row["phone"], "email": row["email"]}
 
 
 def save_lead(phone: str, email: str, source: str = "app_login") -> None:

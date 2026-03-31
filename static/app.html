@@ -295,6 +295,7 @@
       <label class="text-xs text-slate-400 mb-2 block">Paste your CV or describe your experience</label>
       <textarea id="p-raw" class="input" style="min-height:280px" placeholder="Include: your name, phone, email, education, work history, skills, certifications, achievements...&#10;&#10;The more detail you provide, the better your generated CV will be."></textarea>
     </div>
+    <div id="paste-error" class="text-xs text-red-400 mt-3 hidden"></div>
     <button onclick="buildProfilePaste()" class="btn-primary w-full rounded-xl py-3 text-sm mt-4">
       ⚡ Build My AI Job Kit &rarr;
     </button>
@@ -538,8 +539,30 @@
 
 </main>
 
+<!-- Toast notification -->
+<div id="app-toast" class="fixed bottom-6 right-4 z-50 px-4 py-3 rounded-xl text-sm font-semibold shadow-xl transition-all duration-300 translate-y-16 opacity-0 pointer-events-none" style="max-width:320px"></div>
+
 <!-- ═══════════════════════════════════════════════ JAVASCRIPT -->
 <script>
+// ── Utilities ────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function toast(msg, isErr) {
+  const el = document.getElementById('app-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.background = isErr ? '#7f1d1d' : '#10b981';
+  el.style.color = isErr ? '#fca5a5' : '#0f172a';
+  el.classList.remove('translate-y-16','opacity-0','pointer-events-none');
+  el.classList.add('translate-y-0','opacity-100');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => {
+    el.classList.add('translate-y-16','opacity-0','pointer-events-none');
+    el.classList.remove('translate-y-0','opacity-100');
+  }, 4000);
+}
+
 // ── State ──────────────────────────────────────────────────
 const API = '';  // Same origin
 let state = {
@@ -897,10 +920,13 @@ async function buildProfile() {
 async function buildProfilePaste() {
   if (!state.jobAnalysis) { showScreen('job'); return; }
   const text = document.getElementById('p-raw').value.trim();
+  const errEl = document.getElementById('paste-error');
   if (text.length < 30) {
-    alert('Please add more detail to your profile.');
+    errEl.textContent = 'Please add more detail — include your name, education, work history, and skills.';
+    errEl.classList.remove('hidden');
     return;
   }
+  errEl.classList.add('hidden');
   state.resumeText = text;
   await doGenerate();
 }
@@ -1013,14 +1039,14 @@ function renderResults() {
     div.className = 'accordion' + (i === 0 ? ' open' : '');
     div.innerHTML = `
       <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')">
-        <span>${em.purpose || 'Email ' + (i+1)} <span class="text-slate-500 font-normal text-xs">${em.timing || ''}</span></span>
+        <span>${esc(em.purpose) || 'Email ' + (i+1)} <span class="text-slate-500 font-normal text-xs">${esc(em.timing)}</span></span>
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/></svg>
       </div>
       <div class="accordion-body">
         <div class="text-xs text-slate-500 mb-2 font-semibold">Subject:</div>
-        <div class="mb-3 text-slate-200 text-sm">${em.subject || ''}</div>
+        <div class="mb-3 text-slate-200 text-sm">${esc(em.subject)}</div>
         <div class="text-xs text-slate-500 mb-2 font-semibold">Body:</div>
-        <pre class="text-sm font-sans">${em.body || ''}</pre>
+        <pre class="text-sm font-sans whitespace-pre-wrap">${esc(em.body)}</pre>
       </div>`;
     emailsList.appendChild(div);
   });
@@ -1056,10 +1082,11 @@ async function loadLinkedin() {
     state.results._linkedin = li;
     renderLinkedin(li);
   } catch (e) {
-    if (e.message.includes('402')) {
+    // Server returns HTTP 402 with detail "Pro plan required"
+    if (e.message.includes('402') || e.message.toLowerCase().includes('pro plan')) {
       paywallEl.classList.remove('hidden');
     } else {
-      contentEl.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`;
+      contentEl.innerHTML = `<div class="text-red-400 text-sm p-2">${esc(e.message)}</div>`;
     }
   } finally {
     loaderEl.classList.add('hidden');
@@ -1071,29 +1098,29 @@ function renderLinkedin(li) {
   el.innerHTML = `
     <div class="card mb-3">
       <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wide">Headline</div>
-      <div class="text-sm font-mono bg-slate-900 rounded-lg p-3 text-emerald-300">${li.headline||''}</div>
+      <div class="text-sm font-mono bg-slate-900 rounded-lg p-3 text-emerald-300">${esc(li.headline)}</div>
     </div>
     <div class="card mb-3">
       <div class="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wide">About Section</div>
-      <pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${li.about||''}</pre>
+      <pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${esc(li.about)}</pre>
     </div>
     <div class="card mb-3">
       <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wide">Experience Bullets</div>
-      ${(li.experience_bullets||[]).map(b=>`<div class="text-sm text-slate-300 mb-1.5">• ${b}</div>`).join('')}
+      ${(li.experience_bullets||[]).map(b=>`<div class="text-sm text-slate-300 mb-1.5">• ${esc(b)}</div>`).join('')}
     </div>
     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
       <div class="card">
         <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wide">Skills to add</div>
-        ${(li.featured_skills||[]).map(s=>`<span class="tag mr-1 mb-1">${s}</span>`).join('')}
+        ${(li.featured_skills||[]).map(s=>`<span class="tag mr-1 mb-1">${esc(s)}</span>`).join('')}
       </div>
       <div class="card">
         <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wide">Connection Request (300 chars)</div>
-        <pre class="text-xs font-sans text-slate-300 whitespace-pre-wrap">${li.connection_message||''}</pre>
+        <pre class="text-xs font-sans text-slate-300 whitespace-pre-wrap">${esc(li.connection_message)}</pre>
       </div>
     </div>
     <div class="card mt-3">
       <div class="text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wide">Cold InMail to Hiring Manager</div>
-      <pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${li.inmail_template||''}</pre>
+      <pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${esc(li.inmail_template)}</pre>
     </div>`;
 }
 
@@ -1118,10 +1145,10 @@ async function loadInterview() {
     state.results._interview = prep;
     renderInterview(prep);
   } catch (e) {
-    if (e.message.includes('402')) {
+    if (e.message.includes('402') || e.message.toLowerCase().includes('pro plan')) {
       paywallEl.classList.remove('hidden');
     } else {
-      contentEl.innerHTML = `<div class="text-red-400 text-sm">${e.message}</div>`;
+      contentEl.innerHTML = `<div class="text-red-400 text-sm p-2">${esc(e.message)}</div>`;
     }
   } finally {
     loaderEl.classList.add('hidden');
@@ -1145,13 +1172,13 @@ function renderInterview(prep) {
       html += `
         <div class="accordion mb-2">
           <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')">
-            <span>${q.question||''}</span>
+            <span>${esc(q.question)}</span>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/></svg>
           </div>
           <div class="accordion-body">
             <div class="text-emerald-400 text-xs mb-1 font-semibold">STRONG ANSWER</div>
-            <div class="mb-2">${q.strong_answer||''}</div>
-            ${q.tip ? `<div class="pill-amber text-[11px] mt-2">💡 ${q.tip}</div>` : ''}
+            <div class="mb-2 whitespace-pre-wrap">${esc(q.strong_answer)}</div>
+            ${q.tip ? `<div class="pill-amber text-[11px] mt-2">💡 ${esc(q.tip)}</div>` : ''}
           </div>
         </div>`;
     });
@@ -1160,19 +1187,19 @@ function renderInterview(prep) {
   const qsToAsk = prep.questions_to_ask_employer || [];
   if (qsToAsk.length) {
     html += `<div class="card mt-4"><div class="font-bold text-sm mb-2">❓ Questions to Ask Them</div>`;
-    html += qsToAsk.map(q => `<div class="text-sm text-slate-300 mb-1">• ${q}</div>`).join('');
+    html += qsToAsk.map(q => `<div class="text-sm text-slate-300 mb-1">• ${esc(q)}</div>`).join('');
     html += '</div>';
   }
 
   const salary = prep.salary_negotiation_script;
   if (salary) {
-    html += `<div class="card mt-4 border-emerald-500/20"><div class="font-bold text-sm mb-2">💰 Salary Negotiation Script</div><pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${salary}</pre></div>`;
+    html += `<div class="card mt-4 border-emerald-500/20"><div class="font-bold text-sm mb-2">💰 Salary Negotiation Script</div><pre class="text-sm font-sans text-slate-200 whitespace-pre-wrap">${esc(salary)}</pre></div>`;
   }
 
   const tips = prep.first_impression_tips || [];
   if (tips.length) {
     html += `<div class="card mt-4"><div class="font-bold text-sm mb-2">✅ First Impression Tips</div>`;
-    html += tips.map(t => `<div class="text-sm text-slate-300 mb-1">• ${t}</div>`).join('');
+    html += tips.map(t => `<div class="text-sm text-slate-300 mb-1">• ${esc(t)}</div>`).join('');
     html += '</div>';
   }
 
@@ -1211,7 +1238,7 @@ async function download(type, fmt) {
     });
     if (!resp.ok) {
       const j = await resp.json().catch(() => ({}));
-      alert(j.detail || 'Download failed');
+      toast(j.detail || 'Download failed', true);
       return;
     }
     const blob = await resp.blob();
@@ -1219,10 +1246,13 @@ async function download(type, fmt) {
     const a = document.createElement('a');
     a.href = url;
     a.download = filename + '.' + fmt;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    // Delay revoke so browser has time to start the download
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   } catch (e) {
-    alert('Download failed: ' + e.message);
+    toast('Download failed: ' + e.message, true);
   }
 }
 
@@ -1268,8 +1298,7 @@ async function doPayWhatsApp() {
     const price = prices[state.selectedPlan] || 3999;
     const uid = state.user?.user_id || '';
     const msg = `Hi, I want to pay KES ${price.toLocaleString()} for AI Career Accelerator (${state.selectedPlan} Plan).\nUser ID: ${uid}\nPhone: ${phone}\nEmail: ${email}\nPlease send M-Pesa payment instructions.`;
-    const enc = msg.replace(/\n/g, '%0A').replace(/ /g, '%20');
-    window.open(`https://wa.me/254722285538?text=${enc}`, '_blank');
+    window.open(`https://wa.me/254722285538?text=${encodeURIComponent(msg)}`, '_blank');
   }
 }
 
@@ -1281,14 +1310,14 @@ async function checkTierRefresh() {
       if (state.results) state.results.tier = data.tier;
       localStorage.setItem('aica_user', JSON.stringify(state.user));
       updateHeaderUser();
-      alert('✅ Access confirmed! Your ' + data.tier.toUpperCase() + ' plan is now active.');
+      toast('✅ ' + data.tier.toUpperCase() + ' plan confirmed — welcome!');
       showScreen('results');
       renderResults();
     } else {
-      alert('Payment not confirmed yet. If you\'ve paid, please wait a few minutes and try again, or contact us on WhatsApp.');
+      toast('Payment not confirmed yet. Wait a minute then try again, or message us on WhatsApp.', true);
     }
   } catch (e) {
-    alert('Could not check status: ' + e.message);
+    toast('Could not check status: ' + e.message, true);
   }
 }
 
@@ -1303,6 +1332,16 @@ function startOver() {
   document.getElementById('analysis-result').classList.add('hidden');
   showScreen('job');
 }
+
+// ── Keyboard shortcuts ───────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('login-phone').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('login-email').focus();
+  });
+  document.getElementById('login-email').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+});
 
 function markdownToHtml(md) {
   return md

@@ -31,6 +31,7 @@ from agents import (
 from payments_db import (
     init_db,
     get_or_create_user,
+    find_user,
     get_user_tier,
     save_lead,
     mark_user_paid,
@@ -450,9 +451,10 @@ class AdminUserRequest(BaseModel):
 @app.post("/api/admin/user")
 async def admin_find_user(req: AdminUserRequest, x_admin_password: Optional[str] = Header(default=None)):
     _require_admin(x_admin_password)
-    user = get_or_create_user(req.phone, req.email)
+    # Use find_user (lookup-only) — never accidentally creates a record
+    user = find_user(req.phone, req.email)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found. Check phone and email are correct.")
     tier = get_user_tier(user["user_id"])
     payments = get_user_payments(user_id=user["user_id"])
     return {**user, "tier": tier, "payments": payments}
